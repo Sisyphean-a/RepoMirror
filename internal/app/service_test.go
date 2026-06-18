@@ -14,7 +14,7 @@ import (
 	"RepoMirror/internal/testutil"
 )
 
-func TestServicePersistsAndReloadsConfig(t *testing.T) {
+func TestServiceAutoPersistsConfigChanges(t *testing.T) {
 	repoA := t.TempDir()
 	repoB := t.TempDir()
 	testutil.InitRepo(t, repoA)
@@ -40,6 +40,15 @@ func TestServicePersistsAndReloadsConfig(t *testing.T) {
 		t.Fatalf("repository B should be valid git repo")
 	}
 
+	state, err = service.SwapRepositories()
+	if err != nil {
+		t.Fatalf("swap repositories failed: %v", err)
+	}
+	if filepath.Clean(state.Config.ProjectA) != filepath.Clean(repoB) ||
+		filepath.Clean(state.Config.ProjectB) != filepath.Clean(repoA) {
+		t.Fatalf("unexpected repository order after swap: %+v", state.Config)
+	}
+
 	state, err = service.SetDirection(string(model.DirectionBToA))
 	if err != nil {
 		t.Fatalf("set direction failed: %v", err)
@@ -48,13 +57,16 @@ func TestServicePersistsAndReloadsConfig(t *testing.T) {
 		t.Fatalf("unexpected slots after direction change: %+v", state)
 	}
 
-	if _, err := service.SaveConfig(); err != nil {
-		t.Fatalf("save config failed: %v", err)
-	}
-
 	reloadedConfig, err := store.Load()
 	if err != nil {
 		t.Fatalf("reload config failed: %v", err)
+	}
+	if filepath.Clean(reloadedConfig.ProjectA) != filepath.Clean(repoB) ||
+		filepath.Clean(reloadedConfig.ProjectB) != filepath.Clean(repoA) {
+		t.Fatalf("expected swapped repositories in saved config, got %+v", reloadedConfig)
+	}
+	if reloadedConfig.Direction != model.DirectionBToA {
+		t.Fatalf("expected saved direction %s, got %s", model.DirectionBToA, reloadedConfig.Direction)
 	}
 	reloaded := newTestService(t, store, &selectorStub{}, reloadedConfig)
 	reloaded.Startup(context.Background())
@@ -68,6 +80,27 @@ func TestServicePersistsAndReloadsConfig(t *testing.T) {
 	}
 	if reloadedState.RepositoryA.Path == "" || reloadedState.RepositoryB.Path == "" {
 		t.Fatalf("expected restored repository paths, got %+v", reloadedState.Config)
+	}
+}
+
+func TestServiceDoesNotMutateConfigWhenAutoPersistFails(t *testing.T) {
+	repoA := t.TempDir()
+	testutil.InitRepo(t, repoA)
+
+	store := config.NewStoreWithPath(t.TempDir())
+	service := newTestService(t, store, &selectorStub{paths: []string{repoA}}, model.DefaultConfig())
+	service.Startup(context.Background())
+
+	if _, err := service.SelectRepository("A"); err == nil {
+		t.Fatalf("expected select repository to fail when config persistence fails")
+	}
+
+	state, err := service.LoadState()
+	if err != nil {
+		t.Fatalf("load state after failed save: %v", err)
+	}
+	if state.Config.ProjectA != "" || state.RepositoryA.IsConfigured {
+		t.Fatalf("expected config to stay unchanged after failed save, got %+v", state.Config)
 	}
 }
 

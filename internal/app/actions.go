@@ -25,16 +25,22 @@ func (s *Service) SelectRepository(slot string) (model.DashboardState, error) {
 	if err != nil {
 		return model.DashboardState{}, err
 	}
-	cfg = s.updateConfig(func(next *model.AppConfig) {
+	cfg, err = s.updateConfig(func(next *model.AppConfig) {
 		next.SetPath(repoSlot, root)
 	})
+	if err != nil {
+		return model.DashboardState{}, err
+	}
 	return s.buildState(cfg)
 }
 
 func (s *Service) SwapRepositories() (model.DashboardState, error) {
-	cfg := s.updateConfig(func(next *model.AppConfig) {
+	cfg, err := s.updateConfig(func(next *model.AppConfig) {
 		next.ProjectA, next.ProjectB = next.ProjectB, next.ProjectA
 	})
+	if err != nil {
+		return model.DashboardState{}, err
+	}
 	return s.buildState(cfg)
 }
 
@@ -43,9 +49,12 @@ func (s *Service) SetDirection(direction string) (model.DashboardState, error) {
 	if err != nil {
 		return model.DashboardState{}, err
 	}
-	cfg := s.updateConfig(func(next *model.AppConfig) {
+	cfg, err := s.updateConfig(func(next *model.AppConfig) {
 		next.Direction = parsed
 	})
+	if err != nil {
+		return model.DashboardState{}, err
+	}
 	return s.buildState(cfg)
 }
 

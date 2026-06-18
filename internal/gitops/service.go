@@ -185,6 +185,7 @@ func (execRunner) Run(repoPath string, input []byte, args ...string) ([]byte, er
 	commandArgs := append([]string{"-C", repoPath}, args...)
 	cmd := exec.Command("git", commandArgs...)
 	cmd.Stdin = bytes.NewReader(input)
+	hideConsoleWindow(cmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return output, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))

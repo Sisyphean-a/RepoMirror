@@ -53,7 +53,9 @@ func (s *Service) Shutdown(ctx context.Context) {
 	width, height := runtime.WindowGetSize(ctx)
 	cfg.WindowWidth = width
 	cfg.WindowHeight = height
-	_ = s.store.Save(cfg.WithDefaults())
+	if err := s.saveConfig(cfg); err != nil {
+		runtime.LogErrorf(ctx, "persist config on shutdown: %v", err)
+	}
 }
 
 func (s *Service) LoadState() (model.DashboardState, error) {
@@ -66,7 +68,7 @@ func (s *Service) Refresh() (model.DashboardState, error) {
 
 func (s *Service) SaveConfig() (model.DashboardState, error) {
 	cfg := s.currentConfig()
-	if err := s.store.Save(cfg); err != nil {
+	if err := s.saveConfig(cfg); err != nil {
 		return model.DashboardState{}, err
 	}
 	return s.buildState(cfg)
@@ -78,10 +80,20 @@ func (s *Service) currentConfig() model.AppConfig {
 	return s.config.WithDefaults()
 }
 
-func (s *Service) updateConfig(mutator func(*model.AppConfig)) model.AppConfig {
+func (s *Service) updateConfig(mutator func(*model.AppConfig)) (model.AppConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	mutator(&s.config)
-	s.config = s.config.WithDefaults()
-	return s.config
+
+	next := s.config
+	mutator(&next)
+	next = next.WithDefaults()
+	if err := s.saveConfig(next); err != nil {
+		return model.AppConfig{}, err
+	}
+	s.config = next
+	return s.config, nil
+}
+
+func (s *Service) saveConfig(cfg model.AppConfig) error {
+	return s.store.Save(cfg.WithDefaults())
 }

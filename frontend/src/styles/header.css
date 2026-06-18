@@ -82,34 +82,29 @@
 }
 
 .repo-bars {
+  display: flex;
+  align-items: center;
+  min-height: 46px;
   background: var(--panel-sub);
   border-bottom: 1px solid var(--border-strong);
 }
 
-.repo-row,
-.repo-row-with-actions {
+.repo-row {
   min-height: 46px;
   display: flex;
   align-items: center;
-}
-
-.repo-row {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
-  gap: 14px;
-  padding: 0 18px;
+  gap: 12px;
+  padding: 0 16px;
   font-family: var(--font-mono);
 }
 
-.repo-row-divider {
-  width: 100%;
-  height: 1px;
+.repo-col-divider {
+  align-self: stretch;
+  width: 1px;
+  margin: 8px 0;
   background: #121c26;
-}
-
-.repo-row-with-actions {
-  min-width: 0;
-  justify-content: space-between;
 }
 
 .repo-slot {

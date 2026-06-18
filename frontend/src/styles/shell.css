@@ -64,8 +64,8 @@
   }
 
   .top-bar,
+  .repo-bars,
   .repo-row,
-  .repo-row-with-actions,
   .status-bar {
     flex-wrap: wrap;
     height: auto;

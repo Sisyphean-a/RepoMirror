@@ -72,11 +72,9 @@ function RepositoryBars({
   return (
     <div className="repo-bars">
       <RepoField label="A" repository={repositoryA} isTarget={targetSlot === "A"} onSelect={onSelectRepo} />
-      <div className="repo-row-divider" />
-      <div className="repo-row-with-actions">
-        <RepoField label="B" repository={repositoryB} isTarget={targetSlot === "B"} onSelect={onSelectRepo} />
-        <RepositoryActions busy={busy} direction={direction} onSwap={onSwap} onToggleDirection={onToggleDirection} />
-      </div>
+      <div className="repo-col-divider" />
+      <RepoField label="B" repository={repositoryB} isTarget={targetSlot === "B"} onSelect={onSelectRepo} />
+      <RepositoryActions busy={busy} direction={direction} onSwap={onSwap} onToggleDirection={onToggleDirection} />
     </div>
   );
 }
