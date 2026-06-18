@@ -1,0 +1,175 @@
+package app
+
+import (
+	"context"
+	"path/filepath"
+	"testing"
+
+	"RepoMirror/internal/config"
+	"RepoMirror/internal/diff"
+	"RepoMirror/internal/gitops"
+	"RepoMirror/internal/model"
+	"RepoMirror/internal/platform"
+	"RepoMirror/internal/syncer"
+	"RepoMirror/internal/testutil"
+)
+
+func TestServicePersistsAndReloadsConfig(t *testing.T) {
+	repoA := t.TempDir()
+	repoB := t.TempDir()
+	testutil.InitRepo(t, repoA)
+	testutil.InitRepo(t, repoB)
+
+	store := config.NewStoreWithPath(filepath.Join(t.TempDir(), "config.json"))
+	service := newTestService(t, store, &selectorStub{paths: []string{repoA, repoB}}, model.DefaultConfig())
+	service.Startup(context.Background())
+
+	state, err := service.SelectRepository("A")
+	if err != nil {
+		t.Fatalf("select repo A failed: %v", err)
+	}
+	if !state.RepositoryA.IsGitRepo {
+		t.Fatalf("repository A should be valid git repo")
+	}
+
+	state, err = service.SelectRepository("B")
+	if err != nil {
+		t.Fatalf("select repo B failed: %v", err)
+	}
+	if !state.RepositoryB.IsGitRepo {
+		t.Fatalf("repository B should be valid git repo")
+	}
+
+	state, err = service.SetDirection(string(model.DirectionBToA))
+	if err != nil {
+		t.Fatalf("set direction failed: %v", err)
+	}
+	if state.SourceSlot != model.RepositorySlotB || state.TargetSlot != model.RepositorySlotA {
+		t.Fatalf("unexpected slots after direction change: %+v", state)
+	}
+
+	if _, err := service.SaveConfig(); err != nil {
+		t.Fatalf("save config failed: %v", err)
+	}
+
+	reloadedConfig, err := store.Load()
+	if err != nil {
+		t.Fatalf("reload config failed: %v", err)
+	}
+	reloaded := newTestService(t, store, &selectorStub{}, reloadedConfig)
+	reloaded.Startup(context.Background())
+	reloadedState, err := reloaded.LoadState()
+	if err != nil {
+		t.Fatalf("load reloaded state failed: %v", err)
+	}
+
+	if reloadedState.Config.Direction != model.DirectionBToA {
+		t.Fatalf("expected restored direction %s, got %s", model.DirectionBToA, reloadedState.Config.Direction)
+	}
+	if reloadedState.RepositoryA.Path == "" || reloadedState.RepositoryB.Path == "" {
+		t.Fatalf("expected restored repository paths, got %+v", reloadedState.Config)
+	}
+}
+
+func TestServiceSyncCommitAndPushFlow(t *testing.T) {
+	source := t.TempDir()
+	target := t.TempDir()
+	remote := filepath.Join(t.TempDir(), "remote.git")
+
+	testutil.InitRepo(t, source)
+	testutil.InitRepo(t, target)
+	testutil.InitBareRepo(t, remote)
+
+	testutil.WriteFile(t, source, ".gitignore", "ignored/\n")
+	testutil.WriteFile(t, source, "tracked.txt", "source tracked")
+	testutil.WriteFile(t, source, "notes.md", "source note")
+	testutil.WriteFile(t, source, "ignored/skip.txt", "ignored")
+	testutil.CommitAll(t, source, "source init")
+
+	testutil.WriteFile(t, target, ".gitignore", "ignored/\n")
+	testutil.WriteFile(t, target, "tracked.txt", "target old")
+	testutil.CommitAll(t, target, "target init")
+	testutil.RunGitOutput(t, target, "remote", "add", "origin", remote)
+	branch := testutil.CurrentBranch(t, target)
+	testutil.RunGitOutput(t, target, "push", "-u", "origin", branch)
+
+	testutil.WriteFile(t, target, "tracked.txt", "target dirty")
+	testutil.WriteFile(t, target, "scratch.txt", "untracked")
+
+	service := newTestService(t, config.NewStoreWithPath(filepath.Join(t.TempDir(), "config.json")), &selectorStub{}, model.AppConfig{
+		ProjectA:  source,
+		ProjectB:  target,
+		Direction: model.DirectionAToB,
+	})
+	service.Startup(context.Background())
+
+	beforeState, err := service.LoadState()
+	if err != nil {
+		t.Fatalf("load state failed: %v", err)
+	}
+	if beforeState.TargetStatus.ModifiedCount == 0 || beforeState.TargetStatus.UntrackedCount == 0 {
+		t.Fatalf("expected dirty target status, got %+v", beforeState.TargetStatus)
+	}
+	if beforeState.Summary.Total == 0 {
+		t.Fatalf("expected differences before sync")
+	}
+
+	syncedState, err := service.SyncRepositories()
+	if err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	if syncedState.Summary.Total != 0 {
+		t.Fatalf("expected no differences after sync, got %+v", syncedState.Summary)
+	}
+	if syncedState.TargetStatus.IsClean {
+		t.Fatalf("target should be dirty after sync before commit")
+	}
+	if testutil.RunGitOutput(t, target, "status", "--short") == "" {
+		t.Fatalf("expected git changes after sync")
+	}
+
+	committedState, err := service.CommitTarget("sync target")
+	if err != nil {
+		t.Fatalf("commit failed: %v", err)
+	}
+	if !committedState.TargetStatus.IsClean {
+		t.Fatalf("target should be clean after commit, got %+v", committedState.TargetStatus)
+	}
+
+	if _, err := service.PushTarget(); err != nil {
+		t.Fatalf("push failed: %v", err)
+	}
+	localHead := testutil.RunGitOutput(t, target, "rev-parse", "HEAD")
+	remoteHead := testutil.RunGitOutput(t, target, "--git-dir", remote, "rev-parse", "refs/heads/"+branch)
+	if localHead != remoteHead {
+		t.Fatalf("expected remote head %s to match local head %s", remoteHead, localHead)
+	}
+}
+
+func newTestService(
+	t *testing.T,
+	store *config.Store,
+	selector DirectorySelector,
+	initialConfig model.AppConfig,
+) *Service {
+	t.Helper()
+	fileSystem := platform.NewOSFileSystem()
+	inspector := gitops.NewService(gitops.NewExecRunner())
+	differ := diff.NewService(fileSystem, inspector)
+	synchronizer := syncer.NewService(fileSystem, differ)
+	return NewService(store, selector, inspector, differ, synchronizer, initialConfig)
+}
+
+type selectorStub struct {
+	paths []string
+	index int
+}
+
+func (stub *selectorStub) Open(context.Context, string, string) (string, error) {
+	if stub.index >= len(stub.paths) {
+		return "", nil
+	}
+	path := stub.paths[stub.index]
+	stub.index++
+	return path, nil
+}
