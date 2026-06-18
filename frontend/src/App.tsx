@@ -7,11 +7,11 @@ import { useRepoMirror } from "./useRepoMirror";
 
 function App() {
   const viewModel = useRepoMirror();
-  return viewModel.state ? <Dashboard {...viewModel} /> : <LoadingScreen error={viewModel.error} />;
+  return viewModel.state ? <Dashboard {...viewModel} /> : <LoadingScreen error={viewModel.error} message={viewModel.busyMessage} />;
 }
 
 function Dashboard(viewModel: ReturnType<typeof useRepoMirror>) {
-  const { busy, commitMessage, error, filter, lastUpdatedAt, notice, searchTerm, visibleEntries } = viewModel;
+  const { busy, busyMessage, commitMessage, error, filter, lastUpdatedAt, notice, searchTerm, visibleEntries } = viewModel;
   const state = viewModel.state!;
   const sourceRepo = state.sourceSlot === "A" ? state.repositoryA : state.repositoryB;
   const targetRepo = state.targetSlot === "A" ? state.repositoryA : state.repositoryB;
@@ -61,14 +61,33 @@ function Dashboard(viewModel: ReturnType<typeof useRepoMirror>) {
             disableActions={busy || !state.targetStatus.isGitRepo}
           />
         </main>
-        <AppStatusBar error={error} notice={notice} lastUpdatedAt={lastUpdatedAt} />
+        <AppStatusBar busyMessage={busyMessage} error={error} notice={notice} lastUpdatedAt={lastUpdatedAt} />
+        {busy ? <BusyOverlay message={busyMessage} /> : null}
       </div>
     </div>
   );
 }
 
-function LoadingScreen({ error }: { error: string }) {
-  return <div className="loading-screen">{error || "正在扫描仓库状态..."}</div>;
+function LoadingScreen({ error, message }: { error: string; message: string }) {
+  return (
+    <div className="loading-screen">
+      <div className={`loading-card ${error ? "error" : ""}`}>
+        {error ? null : <span className="loading-spinner" aria-hidden="true" />}
+        <span>{error || message || "正在扫描仓库状态..."}</span>
+      </div>
+    </div>
+  );
+}
+
+function BusyOverlay({ message }: { message: string }) {
+  return (
+    <div className="busy-overlay" aria-busy="true" aria-live="polite" role="status">
+      <div className="busy-card">
+        <span className="loading-spinner" aria-hidden="true" />
+        <span>{message || "正在处理..."}</span>
+      </div>
+    </div>
+  );
 }
 
 export default App;

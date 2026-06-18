@@ -20,6 +20,10 @@
   color: #2d5c40;
 }
 
+.status-meta.busy {
+  color: var(--text-success);
+}
+
 .status-meta.error {
   color: #8b4b3d;
 }
@@ -31,4 +35,8 @@
 .status-icon {
   width: 11px;
   height: 11px;
+}
+
+.status-spinner {
+  flex: none;
 }

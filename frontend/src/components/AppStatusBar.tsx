@@ -2,12 +2,16 @@ import { ClockIcon, SaveIcon } from "./Icons";
 import { formatRelativeTime } from "./ui";
 
 interface AppStatusBarProps {
+  busyMessage: string;
   error: string;
   notice: string;
   lastUpdatedAt: number;
 }
 
-export function AppStatusBar({ error, notice, lastUpdatedAt }: AppStatusBarProps) {
+export function AppStatusBar({ busyMessage, error, notice, lastUpdatedAt }: AppStatusBarProps) {
+  const tone = busyMessage ? "busy" : error ? "error" : notice ? "success" : "";
+  const message = busyMessage || error || notice || "就绪";
+
   return (
     <footer className="status-bar">
       <div className="status-meta">
@@ -21,9 +25,9 @@ export function AppStatusBar({ error, notice, lastUpdatedAt }: AppStatusBarProps
         <ClockIcon className="status-icon" />
         <span>{formatRelativeTime(lastUpdatedAt)}</span>
       </div>
-      <div className={`status-meta ${error ? "error" : notice ? "success" : ""}`}>
-        <SaveIcon className="status-icon" />
-        <span>{error || notice || "就绪"}</span>
+      <div className={`status-meta ${tone}`}>
+        {busyMessage ? <span className="status-spinner" aria-hidden="true" /> : <SaveIcon className="status-icon" />}
+        <span>{message}</span>
       </div>
     </footer>
   );

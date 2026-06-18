@@ -14,6 +14,7 @@ import type { DashboardState, DiffEntry, DiffFilter, Direction, RepositorySlot }
 
 interface ViewModel {
   busy: boolean;
+  busyMessage: string;
   commitMessage: string;
   error: string;
   filter: DiffFilter;
@@ -39,6 +40,7 @@ export function useRepoMirror(): ViewModel {
   const [state, setState] = useState<DashboardState | null>(null);
   const [filter, setFilter] = useState<DiffFilter>("all");
   const [busy, setBusy] = useState(false);
+  const [busyMessage, setBusyMessage] = useState("");
   const [error, setError] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(0);
   const [notice, setNotice] = useState("");
@@ -46,13 +48,18 @@ export function useRepoMirror(): ViewModel {
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
-    void executeAction(setters(setState, setBusy, setError, setLastUpdatedAt, setNotice), loadState);
+    void executeAction(
+      setters(setState, setBusy, setBusyMessage, setError, setLastUpdatedAt, setNotice),
+      loadState,
+      { pendingNotice: "正在扫描仓库状态..." },
+    );
   }, []);
 
   const visibleEntries = filterEntries(state?.differences ?? [], filter, searchTerm);
   const action = actionFactory({
     commitMessage,
     setBusy,
+    setBusyMessage,
     setCommitMessage,
     setError,
     setLastUpdatedAt,
@@ -62,6 +69,7 @@ export function useRepoMirror(): ViewModel {
 
   return {
     busy,
+    busyMessage,
     commitMessage,
     error,
     filter,
@@ -80,16 +88,18 @@ export function useRepoMirror(): ViewModel {
 function setters(
   setState: (value: DashboardState | null | ((prev: DashboardState | null) => DashboardState | null)) => void,
   setBusy: (value: boolean) => void,
+  setBusyMessage: (value: string) => void,
   setError: (value: string) => void,
   setLastUpdatedAt: (value: number) => void,
   setNotice: (value: string) => void,
 ) {
-  return { setState, setBusy, setError, setLastUpdatedAt, setNotice };
+  return { setState, setBusy, setBusyMessage, setError, setLastUpdatedAt, setNotice };
 }
 
 function actionFactory(context: {
   commitMessage: string;
   setBusy: (value: boolean) => void;
+  setBusyMessage: (value: string) => void;
   setCommitMessage: (value: string) => void;
   setError: (value: string) => void;
   setLastUpdatedAt: (value: number) => void;
@@ -97,57 +107,64 @@ function actionFactory(context: {
   setState: (value: DashboardState | null | ((prev: DashboardState | null) => DashboardState | null)) => void;
 }) {
   return {
-    selectRepo: (slot: RepositorySlot) => executeAction(context, () => selectRepository(slot)),
-    swap: () => executeAction(context, swapRepositories, "已交换仓库路径"),
-    changeDirection: (direction: Direction) => executeAction(context, () => setDirection(direction)),
-    save: () => executeAction(context, saveConfig, "配置已保存"),
-    refresh: () => executeAction(context, refreshState, "状态已刷新"),
-    sync: () => executeAction(context, syncRepositories, "同步完成"),
+    selectRepo: (slot: RepositorySlot) =>
+      executeAction(context, () => selectRepository(slot), { pendingNotice: `正在选择仓库 ${slot}...` }),
+    swap: () => executeAction(context, swapRepositories, { pendingNotice: "正在交换仓库...", successNotice: "已交换仓库路径" }),
+    changeDirection: (direction: Direction) =>
+      executeAction(context, () => setDirection(direction), { pendingNotice: "正在切换同步方向..." }),
+    save: () => executeAction(context, saveConfig, { pendingNotice: "正在保存配置...", successNotice: "配置已保存" }),
+    refresh: () => executeAction(context, refreshState, { pendingNotice: "正在刷新状态...", successNotice: "状态已刷新" }),
+    sync: () => executeAction(context, syncRepositories, { pendingNotice: "正在同步仓库...", successNotice: "同步完成" }),
     commit: () => commitAction(context),
-    push: () => executeAction(context, pushTarget, "推送完成"),
+    push: () => executeAction(context, pushTarget, { pendingNotice: "正在推送目标仓库...", successNotice: "推送完成" }),
   };
 }
 
 async function commitAction(context: {
   commitMessage: string;
   setBusy: (value: boolean) => void;
+  setBusyMessage: (value: string) => void;
   setCommitMessage: (value: string) => void;
   setError: (value: string) => void;
   setLastUpdatedAt: (value: number) => void;
   setNotice: (value: string) => void;
   setState: (value: DashboardState | null | ((prev: DashboardState | null) => DashboardState | null)) => void;
 }) {
-  await executeAction(context, () => commitTarget(context.commitMessage), "提交完成");
+  await executeAction(context, () => commitTarget(context.commitMessage), {
+    pendingNotice: "正在创建提交...",
+    successNotice: "提交完成",
+  });
   context.setCommitMessage("");
 }
 
 async function executeAction(
   context: {
     setBusy: (value: boolean) => void;
+    setBusyMessage: (value: string) => void;
     setError: (value: string) => void;
     setLastUpdatedAt: (value: number) => void;
     setNotice: (value: string) => void;
     setState: (value: DashboardState | null | ((prev: DashboardState | null) => DashboardState | null)) => void;
   },
   action: () => Promise<DashboardState>,
-  successNotice = "",
+  status: { pendingNotice: string; successNotice?: string },
 ) {
   context.setBusy(true);
+  context.setBusyMessage(status.pendingNotice);
   context.setError("");
-  if (successNotice) {
-    context.setNotice("");
-  }
+  context.setNotice("");
   try {
     const nextState = await action();
     startTransition(() => context.setState(nextState));
     context.setLastUpdatedAt(Date.now());
-    if (successNotice) {
-      context.setNotice(successNotice);
+    if (status.successNotice) {
+      context.setNotice(status.successNotice);
     }
   } catch (error) {
     context.setError(error instanceof Error ? error.message : String(error));
   } finally {
     context.setBusy(false);
+    context.setBusyMessage("");
   }
 }
 
