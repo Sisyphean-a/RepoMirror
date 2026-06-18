@@ -1,0 +1,231 @@
+.target-panel {
+  min-height: 0;
+  background: var(--panel-alt);
+  border-left: 1px solid var(--border-main);
+  display: flex;
+  flex-direction: column;
+}
+
+.target-header {
+  background: var(--panel-top);
+}
+
+.target-slot {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+}
+
+.target-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.target-summary-block,
+.summary-section,
+.commit-section,
+.target-actions {
+  padding: 16px;
+}
+
+.target-summary-block {
+  padding-bottom: 12px;
+}
+
+.target-repo-line,
+.target-meta-line,
+.summary-row,
+.secondary-actions {
+  display: flex;
+  align-items: center;
+}
+
+.target-repo-line {
+  justify-content: space-between;
+}
+
+.target-name {
+  color: var(--text-main);
+  font: 700 13px/19.5px var(--font-mono);
+}
+
+.target-dirty {
+  font: 500 10px/15px var(--font-sans);
+}
+
+.target-meta-line {
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.target-branch {
+  gap: 4px;
+  color: var(--text-muted);
+  font: 400 11px/16.5px var(--font-mono);
+}
+
+.target-changes {
+  color: #4d5a30;
+  font: 400 10px/15px var(--font-sans);
+}
+
+.target-divider {
+  height: 1px;
+  margin: 10px 0;
+  background: var(--border-soft);
+}
+
+.section-label {
+  color: var(--text-faint);
+  font: 600 9.5px/14.25px var(--font-sans);
+  letter-spacing: 0.95px;
+  text-transform: uppercase;
+}
+
+.summary-section {
+  padding-top: 0;
+  padding-bottom: 4px;
+}
+
+.summary-row {
+  min-height: 24px;
+}
+
+.summary-row:first-of-type {
+  min-height: 30px;
+  padding-top: 6px;
+}
+
+.summary-symbol,
+.summary-count {
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+.summary-symbol {
+  width: 20px;
+  padding-right: 6px;
+  text-align: right;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.summary-count {
+  width: 28px;
+  font-size: 14px;
+  line-height: 21px;
+}
+
+.summary-label {
+  color: var(--text-muted);
+  font: 400 11px/16.5px var(--font-sans);
+}
+
+.summary-symbol.added,
+.summary-count.added {
+  color: #3ddc97;
+}
+
+.summary-symbol.modified,
+.summary-count.modified {
+  color: #c9a227;
+}
+
+.summary-symbol.deleted,
+.summary-count.deleted {
+  color: #e05c5c;
+}
+
+.summary-symbol.protected,
+.summary-count.protected {
+  color: #3d4d5c;
+}
+
+.warning-strip {
+  padding: 11px 16px;
+  border-top: 1px solid var(--warning-border);
+  border-bottom: 1px solid var(--warning-border);
+  background: var(--warning-bg);
+  color: var(--text-warning);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font: 400 11px/15.95px var(--font-sans);
+}
+
+.warning-icon {
+  width: 12px;
+  height: 12px;
+  margin-top: 1px;
+  flex: none;
+}
+
+.commit-section {
+  padding-top: 10px;
+}
+
+.commit-textarea {
+  width: 100%;
+  min-height: 65.5px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  outline: 0;
+  resize: none;
+  background: var(--panel-shell);
+  color: rgba(201, 209, 217, 0.92);
+  font: 400 11px/16.5px var(--font-mono);
+}
+
+.commit-textarea::placeholder {
+  color: rgba(201, 209, 217, 0.5);
+}
+
+.commit-helper {
+  padding-top: 4px;
+  color: #2a3a4a;
+  font: 400 10px/15px var(--font-sans);
+}
+
+.target-actions {
+  margin-top: auto;
+  padding-top: 0;
+}
+
+.sync-button,
+.secondary-button {
+  width: 100%;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.sync-button {
+  height: 34px;
+  border: 1px solid var(--button-green-border);
+  background: var(--button-green);
+  color: var(--text-success);
+  font: 600 12px/18px var(--font-sans);
+}
+
+.secondary-actions {
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.secondary-button {
+  flex: 1;
+  height: 30px;
+  border: 1px solid #1e2b38;
+  background: transparent;
+  color: #6b7d8e;
+  font: 500 11px/16.5px var(--font-sans);
+}
+
+.button-icon {
+  width: 11px;
+  height: 11px;
+}

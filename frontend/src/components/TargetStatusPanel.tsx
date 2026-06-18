@@ -1,57 +1,196 @@
-import type { TargetRepositoryStatus } from "../types";
+import type { DiffSummary, TargetRepositoryStatus } from "../types";
+import { BranchIcon, CommitIcon, PushIcon, SyncIcon, WarningIcon } from "./Icons";
+import { commitHelperText, repoStateLabel, targetNotice } from "./ui";
 
 interface TargetStatusPanelProps {
   status: TargetRepositoryStatus;
+  summary: DiffSummary;
+  targetSlot: "A" | "B";
+  canSync: boolean;
+  busy: boolean;
   commitMessage: string;
+  error: string;
   onCommitMessageChange: (value: string) => void;
+  onSync: () => void;
   onCommit: () => void;
   onPush: () => void;
   disableActions: boolean;
 }
 
 export function TargetStatusPanel(props: TargetStatusPanelProps) {
-  const { status, commitMessage, onCommitMessageChange, onCommit, onPush, disableActions } = props;
   return (
-    <section className="card status-card">
-      <div className="panel-header compact">
-        <div>
-          <h2>目标仓库状态</h2>
-          <p>同步、提交、推送都只针对当前目标仓库。</p>
-        </div>
+    <section className="target-panel">
+      <div className="target-header">
+        <span className="panel-title">Target</span>
+        <span className="target-slot">{props.targetSlot}</span>
       </div>
-      <div className="status-grid">
-        <StatusRow label="仓库" value={status.name || "-"} />
-        <StatusRow label="分支" value={status.branch || "-"} />
-        <StatusRow label="状态" value={status.isClean ? "干净" : "有未提交改动"} />
-        <StatusRow label="未提交" value={String(status.modifiedCount)} />
-        <StatusRow label="未跟踪" value={String(status.untrackedCount)} />
-      </div>
-      <div className={`status-note ${status.isClean ? "ok" : "warn"}`}>
-        {status.error || (status.isClean ? "目标仓库可直接提交或推送。" : "同步前请先判断现有改动是否需要保留。")}
-      </div>
-      <textarea
-        className="commit-input"
-        placeholder="输入提交信息"
-        value={commitMessage}
-        onChange={(event) => onCommitMessageChange(event.target.value)}
-      />
-      <div className="action-row">
-        <button className="primary-button slim" onClick={onCommit} disabled={disableActions}>
-          提交
-        </button>
-        <button className="ghost-button slim" onClick={onPush} disabled={disableActions}>
-          推送
-        </button>
-      </div>
+      <TargetBody props={props} />
     </section>
   );
 }
 
-function StatusRow({ label, value }: { label: string; value: string }) {
+function TargetBody({ props }: { props: TargetStatusPanelProps }) {
+  const actionState = buildActionState(props);
+
   return (
-    <div className="status-row">
-      <span>{label}</span>
-      <strong>{value}</strong>
+    <div className="target-body">
+      <TargetRepoSummary status={props.status} />
+      <div className="target-divider" />
+      <SyncSummarySection summary={props.summary} />
+      <div className="target-divider" />
+      <TargetWarning status={props.status} />
+      <CommitSection
+        commitMessage={props.commitMessage}
+        helperText={actionState.helperText}
+        onCommitMessageChange={props.onCommitMessageChange}
+      />
+      <TargetActions
+        commitDisabled={actionState.commitDisabled}
+        disableActions={props.disableActions}
+        syncDisabled={actionState.syncDisabled}
+        onCommit={props.onCommit}
+        onPush={props.onPush}
+        onSync={props.onSync}
+      />
+    </div>
+  );
+}
+
+function TargetRepoSummary({ status }: { status: TargetRepositoryStatus }) {
+  const branch = status.isGitRepo ? status.branch || "HEAD" : "—";
+  const changeSummary = status.isGitRepo
+    ? `${status.modifiedCount} unstaged · ${status.untrackedCount} untracked`
+    : "status unavailable";
+
+  return (
+    <div className="target-summary-block">
+      <div className="target-repo-line">
+        <span className="target-name">{status.name || "target-repo"}</span>
+        <span className={`target-dirty ${status.isClean ? "ok" : "warn"}`}>{repoStateLabel(status)}</span>
+      </div>
+      <div className="target-meta-line">
+        <span className="target-branch">
+          <BranchIcon className="tiny-icon muted-icon" />
+          {branch}
+        </span>
+        <span className="target-changes">{changeSummary}</span>
+      </div>
+    </div>
+  );
+}
+
+function SyncSummarySection({ summary }: { summary: DiffSummary }) {
+  return (
+    <div className="summary-section">
+      <div className="section-label">Sync Summary</div>
+      <SummaryRow symbol="+" count={summary.added} label="added" tone="added" />
+      <SummaryRow symbol="~" count={summary.modified} label="modified" tone="modified" />
+      <SummaryRow symbol="−" count={summary.deleted} label="deleted" tone="deleted" />
+      <SummaryRow symbol="" count={summary.protected} label="protected" tone="protected" />
+    </div>
+  );
+}
+
+function TargetWarning({ status }: { status: TargetRepositoryStatus }) {
+  return (
+    <div className="warning-strip">
+      <WarningIcon className="warning-icon" />
+      <span>{targetNotice(status)}</span>
+    </div>
+  );
+}
+
+function CommitSection({
+  commitMessage,
+  helperText,
+  onCommitMessageChange,
+}: {
+  commitMessage: string;
+  helperText: string;
+  onCommitMessageChange: (value: string) => void;
+}) {
+  return (
+    <div className="commit-section">
+      <div className="section-label">Commit Message</div>
+      <textarea
+        className="commit-textarea"
+        placeholder="chore: mirror sync from source"
+        value={commitMessage}
+        onChange={(event) => onCommitMessageChange(event.target.value)}
+      />
+      <div className="commit-helper">{helperText}</div>
+    </div>
+  );
+}
+
+function TargetActions({
+  commitDisabled,
+  disableActions,
+  syncDisabled,
+  onCommit,
+  onPush,
+  onSync,
+}: {
+  commitDisabled: boolean;
+  disableActions: boolean;
+  syncDisabled: boolean;
+  onCommit: () => void;
+  onPush: () => void;
+  onSync: () => void;
+}) {
+  return (
+    <div className="target-actions">
+      <button className="sync-button" disabled={syncDisabled} onClick={onSync} type="button">
+        <SyncIcon className="button-icon" />
+        <span>Sync</span>
+      </button>
+      <div className="secondary-actions">
+        <button className="secondary-button" disabled={commitDisabled} onClick={onCommit} type="button">
+          <CommitIcon className="button-icon" />
+          <span>Commit</span>
+        </button>
+        <button className="secondary-button" disabled={disableActions} onClick={onPush} type="button">
+          <PushIcon className="button-icon" />
+          <span>Push</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface ActionState {
+  helperText: string;
+  commitDisabled: boolean;
+  syncDisabled: boolean;
+}
+
+function buildActionState(props: TargetStatusPanelProps): ActionState {
+  const helperText = props.error || commitHelperText(props.status, props.commitMessage, props.busy);
+  const hasPendingChanges = props.status.isGitRepo && !props.status.isClean;
+
+  return {
+    helperText,
+    commitDisabled: props.disableActions || !hasPendingChanges || !props.commitMessage.trim(),
+    syncDisabled: props.busy || !props.canSync,
+  };
+}
+
+function SummaryRow({
+  symbol,
+  count,
+  label,
+  tone,
+}: {
+  symbol: string;
+  count: number;
+  label: string;
+  tone: "added" | "modified" | "deleted" | "protected";
+}) {
+  return (
+    <div className="summary-row">
+      <span className={`summary-symbol ${tone}`}>{symbol}</span>
+      <span className={`summary-count ${tone}`}>{count}</span>
+      <span className="summary-label">{label}</span>
     </div>
   );
 }

@@ -71,40 +71,44 @@ func (s *Service) ListSyncableSourcePaths(repoPath string) ([]string, error) {
 	return dedupe(paths), nil
 }
 
-func (s *Service) IgnoredPaths(repoPath string, paths []string) (map[string]bool, error) {
+func (s *Service) IgnoredPaths(repoPath string, paths []string) (map[string]string, error) {
 	root, err := s.ResolveRepositoryRoot(repoPath)
 	if err != nil {
 		return nil, err
 	}
-	input := buildNullSeparatedInput(paths)
-	if len(input) == 0 {
-		return map[string]bool{}, nil
+	input := buildLineSeparatedInput(paths)
+	if input == "" {
+		return map[string]string{}, nil
 	}
-	output, err := s.runner.Run(root, input, "check-ignore", "--stdin", "-z", "--no-index")
+	output, err := s.runner.Run(root, []byte(input), "check-ignore", "-v", "--stdin", "--no-index")
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-			return map[string]bool{}, nil
+			return map[string]string{}, nil
 		}
 		return nil, fmt.Errorf("failed to evaluate target ignore rules: %w", err)
 	}
-	ignored := make(map[string]bool, len(paths))
-	for _, relPath := range splitNullSeparated(output) {
-		ignored[relPath] = true
+	ignored := make(map[string]string, len(paths))
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		relPath, rule := parseIgnoredPathRule(line)
+		if relPath == "" {
+			continue
+		}
+		ignored[relPath] = rule
 	}
 	return ignored, nil
 }
 
-func buildNullSeparatedInput(paths []string) []byte {
+func buildLineSeparatedInput(paths []string) string {
 	buffer := bytes.NewBuffer(nil)
 	for _, path := range dedupe(paths) {
 		if path == "" {
 			continue
 		}
 		buffer.WriteString(path)
-		buffer.WriteByte(0)
+		buffer.WriteByte('\n')
 	}
-	return buffer.Bytes()
+	return buffer.String()
 }
 
 func splitNullSeparated(raw []byte) []string {
@@ -120,6 +124,34 @@ func splitNullSeparated(raw []byte) []string {
 		}
 	}
 	return paths
+}
+
+func parseIgnoredPathRule(line string) (string, string) {
+	parts := strings.SplitN(strings.TrimSpace(line), "\t", 2)
+	if len(parts) != 2 {
+		return "", ""
+	}
+	meta := parts[0]
+	path := filepath.ToSlash(strings.TrimSpace(parts[1]))
+	patternStart := strings.LastIndex(meta, ":")
+	if patternStart == -1 || patternStart == len(meta)-1 {
+		return path, "ignore-protected"
+	}
+	return path, ignoredRuleLabel(meta[patternStart+1:])
+}
+
+func ignoredRuleLabel(pattern string) string {
+	lower := strings.ToLower(strings.TrimSpace(pattern))
+	switch {
+	case strings.Contains(lower, ".env"):
+		return "env-protected"
+	case strings.Contains(lower, ".yaml"), strings.Contains(lower, ".yml"), strings.Contains(lower, "config"):
+		return "cfg-protected"
+	case strings.Contains(lower, "secret"), strings.Contains(lower, "key"):
+		return "secret-protected"
+	default:
+		return "ignore-protected"
+	}
 }
 
 func isProtectedPath(relPath string) bool {

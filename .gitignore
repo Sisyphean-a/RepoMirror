@@ -1,4 +1,9 @@
 build/bin
+build/figma-*.png
+build/preview*
+build/viewport-probe.html
 node_modules
 frontend/dist
 frontend/package.json.md5
+frontend/preview.html
+frontend/*-probe.html

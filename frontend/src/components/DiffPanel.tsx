@@ -1,60 +1,155 @@
 import type { DiffEntry, DiffFilter, DiffSummary } from "../types";
-import { diffKindLabel } from "../types";
+import { diffKindCode, diffKindLabel } from "../types";
+import { SearchIcon } from "./Icons";
+import { diffKindTone, formatSize, isDisabledAction } from "./ui";
 
 interface DiffPanelProps {
   filter: DiffFilter;
   summary: DiffSummary;
   entries: DiffEntry[];
+  searchTerm: string;
   onFilterChange: (filter: DiffFilter) => void;
+  onSearchTermChange: (value: string) => void;
 }
 
-export function DiffPanel({ filter, summary, entries, onFilterChange }: DiffPanelProps) {
+export function DiffPanel(props: DiffPanelProps) {
   return (
-    <section className="card diff-card">
-      <div className="panel-header">
-        <div>
-          <h2>差异文件</h2>
-          <p>源端输出 + 目标端保护规则共同决定最终同步结果。</p>
-        </div>
-        <div className="filter-row">
-          {renderFilterButton("all", "全部", filter, onFilterChange)}
-          {renderFilterButton("added", "新增", filter, onFilterChange, summary.added)}
-          {renderFilterButton("modified", "修改", filter, onFilterChange, summary.modified)}
-          {renderFilterButton("deleted", "删除", filter, onFilterChange, summary.deleted)}
-        </div>
-      </div>
-      <div className="diff-list">
-        {entries.length === 0 ? (
-          <div className="empty-state">当前方向下没有需要同步的差异。</div>
-        ) : (
-          entries.map((entry) => (
-            <div className={`diff-item ${entry.kind}`} key={`${entry.kind}-${entry.path}`}>
-              <span className="diff-badge">{diffKindLabel[entry.kind]}</span>
-              <span className="diff-path">{entry.path}</span>
-            </div>
-          ))
-        )}
-      </div>
-      <div className="panel-footer">共 {summary.total} 项差异</div>
+    <section className="diff-panel">
+      <DiffPanelTopbar
+        totalVisible={props.entries.length}
+        total={props.summary.total}
+        searchTerm={props.searchTerm}
+        onSearchTermChange={props.onSearchTermChange}
+      />
+      <DiffFilterBar filter={props.filter} summary={props.summary} onFilterChange={props.onFilterChange} />
+      <DiffTable rows={props.entries} />
     </section>
+  );
+}
+
+function DiffPanelTopbar({
+  totalVisible,
+  total,
+  searchTerm,
+  onSearchTermChange,
+}: {
+  totalVisible: number;
+  total: number;
+  searchTerm: string;
+  onSearchTermChange: (value: string) => void;
+}) {
+  return (
+    <div className="panel-topbar">
+      <div className="panel-title-wrap">
+        <span className="panel-title">Diff Plan</span>
+        <span className="panel-count">
+          {totalVisible} / {total}
+        </span>
+      </div>
+      <label className="search-box">
+        <SearchIcon className="search-icon" />
+        <input
+          className="search-input"
+          value={searchTerm}
+          onChange={(event) => onSearchTermChange(event.target.value)}
+          placeholder="path / type / rule..."
+          type="text"
+        />
+      </label>
+    </div>
+  );
+}
+
+function DiffFilterBar({
+  filter,
+  summary,
+  onFilterChange,
+}: {
+  filter: DiffFilter;
+  summary: DiffSummary;
+  onFilterChange: (filter: DiffFilter) => void;
+}) {
+  return (
+    <div className="filter-bar">
+      {renderFilterButton("all", "All", summary.total, filter, onFilterChange)}
+      {renderFilterButton("added", "Added", summary.added, filter, onFilterChange)}
+      {renderFilterButton("modified", "Modified", summary.modified, filter, onFilterChange)}
+      {renderFilterButton("deleted", "Deleted", summary.deleted, filter, onFilterChange)}
+      {renderFilterButton("protected", "Protected", summary.protected, filter, onFilterChange)}
+    </div>
+  );
+}
+
+function DiffTable({ rows }: { rows: DiffEntry[] }) {
+  if (rows.length === 0) {
+    return (
+      <div className="table-wrap">
+        <TableHeader />
+        <div className="table-body">
+          <div className="empty-table">No files match the current filter.</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="table-wrap">
+      <TableHeader />
+      <div className="table-body">
+        {rows.map((entry, index) => <DiffRow entry={entry} alt={index % 2 === 0} key={`${entry.kind}-${entry.path}`} />)}
+      </div>
+    </div>
+  );
+}
+
+function TableHeader() {
+  return (
+    <div className="table-header">
+      <span className="col-type">Type</span>
+      <span className="col-path">Path</span>
+      <span className="col-rule">Rule</span>
+      <span className="col-size">Size</span>
+    </div>
+  );
+}
+
+function DiffRow({ entry, alt }: { entry: DiffEntry; alt: boolean }) {
+  const pathClassName = [
+    "path-cell",
+    entry.kind === "deleted" ? "deleted" : "",
+    isDisabledAction(entry.kind) ? "protected" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <div className={`table-row ${alt ? "alt" : ""}`}>
+      <span className={`type-badge ${diffKindTone(entry.kind)}`}>{diffKindCode[entry.kind]}</span>
+      <span className={pathClassName} title={entry.path}>
+        {entry.path}
+      </span>
+      <span className={`rule-cell ${entry.rule ? "visible" : ""}`}>{entry.rule || "—"}</span>
+      <span className="size-cell">{formatSize(entry.sizeBytes)}</span>
+    </div>
   );
 }
 
 function renderFilterButton(
   value: DiffFilter,
   label: string,
+  count: number,
   active: DiffFilter,
   onChange: (filter: DiffFilter) => void,
-  count?: number,
 ) {
   return (
     <button
-      className={`filter-button ${active === value ? "active" : ""}`}
+      className={`filter-pill ${active === value ? "active" : ""}`}
       onClick={() => onChange(value)}
       type="button"
+      title={`${diffKindLabel[value as keyof typeof diffKindLabel] ?? label}: ${count}`}
     >
-      {label}
-      {count !== undefined ? ` ${count}` : ""}
+      <span>{label}</span>
+      <span className="filter-count">{count}</span>
     </button>
   );
 }

@@ -1,0 +1,173 @@
+.top-bar {
+  height: 38px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-main);
+  background: var(--panel-top);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-block {
+  gap: 6px;
+}
+
+.brand-logo {
+  width: 15px;
+  height: 15px;
+  color: var(--text-success);
+}
+
+.brand-name {
+  color: var(--text-muted);
+  font: 600 12px/18px var(--font-sans);
+  letter-spacing: 0.12px;
+}
+
+.top-divider {
+  width: 1px;
+  height: 14px;
+  background: #1e2b38;
+}
+
+.direction-block {
+  gap: 8px;
+}
+
+.direction-pill {
+  min-width: 52px;
+  height: 19px;
+  padding: 0 6px;
+  border: 1px solid var(--pill-border);
+  border-radius: 4px;
+  background: var(--pill-bg);
+  color: var(--text-success);
+  font: 700 10px/15px var(--font-mono);
+  letter-spacing: 0.8px;
+}
+
+.top-repo {
+  font: 400 12px/18px var(--font-mono);
+}
+
+.top-repo.muted {
+  color: var(--text-muted);
+}
+
+.top-repo.strong {
+  color: var(--text-main);
+}
+
+.top-spacer {
+  flex: 1;
+}
+
+.branch-block {
+  gap: 6px;
+  color: var(--text-muted);
+  font: 400 11px/16.5px var(--font-mono);
+}
+
+.branch-name {
+  color: var(--text-muted);
+}
+
+.branch-separator {
+  color: #1a2430;
+  font: 400 12px/18px var(--font-sans);
+}
+
+.top-actions {
+  gap: 1px;
+}
+
+.repo-bars {
+  background: var(--panel-sub);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.repo-row,
+.repo-row-with-actions {
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+}
+
+.repo-row {
+  gap: 10px;
+  padding: 0 16px;
+  font-family: var(--font-mono);
+}
+
+.repo-row-divider {
+  width: 100%;
+  height: 1px;
+  background: #121c26;
+}
+
+.repo-row-with-actions {
+  justify-content: space-between;
+}
+
+.repo-slot {
+  color: #3d4d5c;
+  font: 700 10px/15px var(--font-mono);
+  letter-spacing: 0.3px;
+}
+
+.repo-slot.secondary {
+  color: #3ddc97;
+}
+
+.repo-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.repo-row-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font: 400 11px/16.5px var(--font-mono);
+}
+
+.repo-inline-meta {
+  gap: 4px;
+  color: var(--text-muted);
+  font: 400 10px/15px var(--font-mono);
+  white-space: nowrap;
+}
+
+.repo-branch {
+  color: inherit;
+}
+
+.repo-state-dot {
+  width: 5px;
+  height: 5px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.repo-target-tag {
+  color: #2a3a4a;
+  font: 600 9px/13.5px var(--font-sans);
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+}
+
+.repo-select-button {
+  width: 19px;
+  height: 16px;
+  border-radius: 3px;
+  color: #3d4d5c;
+}
+
+.repo-inline-actions {
+  height: 22px;
+  gap: 2px;
+  padding: 0 8px 0 9px;
+  border-left: 1px solid #121c26;
+}

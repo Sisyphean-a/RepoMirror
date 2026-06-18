@@ -39,7 +39,7 @@ func (s *Service) Sync(request Request) error {
 
 func (s *Service) applyCopies(request Request, entries []model.DiffEntry) error {
 	for _, entry := range entries {
-		if entry.Kind == model.DiffKindDeleted {
+		if entry.Kind != model.DiffKindAdded && entry.Kind != model.DiffKindModified {
 			continue
 		}
 		if err := s.copyFile(request, entry.Path); err != nil {

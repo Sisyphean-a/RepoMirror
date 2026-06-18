@@ -14,6 +14,7 @@ type FileSystem interface {
 	ListRegularFiles(root string) ([]string, error)
 	Exists(path string) (bool, error)
 	FilesEqual(left string, right string) (bool, error)
+	FileSize(path string) (int64, error)
 	ReadFile(path string) ([]byte, error)
 	WriteFile(path string, data []byte, perm fs.FileMode) error
 	FileMode(path string) (fs.FileMode, error)
@@ -75,6 +76,14 @@ func (fsys *OSFileSystem) FilesEqual(left string, right string) (bool, error) {
 		return false, nil
 	}
 	return compareFileContents(left, right)
+}
+
+func (fsys *OSFileSystem) FileSize(path string) (int64, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
 }
 
 func (fsys *OSFileSystem) ReadFile(path string) ([]byte, error) {

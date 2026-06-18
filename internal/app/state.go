@@ -44,6 +44,15 @@ func (s *Service) buildRepositorySummary(slot model.RepositorySlot, path string)
 	summary.Path = root
 	summary.Name = model.RepositoryName(root)
 	summary.IsGitRepo = true
+	status, err := s.inspector.ReadTargetStatus(root)
+	if err != nil {
+		summary.ValidationError = err.Error()
+		return summary
+	}
+	summary.Branch = status.Branch
+	summary.IsClean = status.IsClean
+	summary.ModifiedCount = status.ModifiedCount
+	summary.UntrackedCount = status.UntrackedCount
 	return summary
 }
 
@@ -82,7 +91,7 @@ func (s *Service) enrichDifferences(state *model.DashboardState) error {
 	}
 	state.Differences = result.Entries
 	state.Summary = result.Summary
-	state.CanSync = true
+	state.CanSync = result.Summary.Added+result.Summary.Modified+result.Summary.Deleted > 0
 	return nil
 }
 

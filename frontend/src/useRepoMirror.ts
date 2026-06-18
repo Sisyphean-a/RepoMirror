@@ -17,11 +17,14 @@ interface ViewModel {
   commitMessage: string;
   error: string;
   filter: DiffFilter;
+  lastUpdatedAt: number;
   notice: string;
+  searchTerm: string;
   state: DashboardState | null;
   visibleEntries: DiffEntry[];
   setFilter: (filter: DiffFilter) => void;
   setCommitMessage: (value: string) => void;
+  setSearchTerm: (value: string) => void;
   selectRepo: (slot: RepositorySlot) => Promise<void>;
   swap: () => Promise<void>;
   changeDirection: (direction: Direction) => Promise<void>;
@@ -37,26 +40,51 @@ export function useRepoMirror(): ViewModel {
   const [filter, setFilter] = useState<DiffFilter>("all");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(0);
   const [notice, setNotice] = useState("");
   const [commitMessage, setCommitMessage] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
-    void executeAction(setters(setState, setBusy, setError, setNotice), loadState);
+    void executeAction(setters(setState, setBusy, setError, setLastUpdatedAt, setNotice), loadState);
   }, []);
 
-  const visibleEntries = filterEntries(state?.differences ?? [], filter);
-  const action = actionFactory({ commitMessage, setBusy, setCommitMessage, setError, setNotice, setState });
+  const visibleEntries = filterEntries(state?.differences ?? [], filter, searchTerm);
+  const action = actionFactory({
+    commitMessage,
+    setBusy,
+    setCommitMessage,
+    setError,
+    setLastUpdatedAt,
+    setNotice,
+    setState,
+  });
 
-  return { busy, commitMessage, error, filter, notice, state, visibleEntries, setFilter, setCommitMessage, ...action };
+  return {
+    busy,
+    commitMessage,
+    error,
+    filter,
+    lastUpdatedAt,
+    notice,
+    searchTerm,
+    state,
+    visibleEntries,
+    setFilter,
+    setCommitMessage,
+    setSearchTerm,
+    ...action,
+  };
 }
 
 function setters(
   setState: (value: DashboardState | null | ((prev: DashboardState | null) => DashboardState | null)) => void,
   setBusy: (value: boolean) => void,
   setError: (value: string) => void,
+  setLastUpdatedAt: (value: number) => void,
   setNotice: (value: string) => void,
 ) {
-  return { setState, setBusy, setError, setNotice };
+  return { setState, setBusy, setError, setLastUpdatedAt, setNotice };
 }
 
 function actionFactory(context: {
@@ -64,6 +92,7 @@ function actionFactory(context: {
   setBusy: (value: boolean) => void;
   setCommitMessage: (value: string) => void;
   setError: (value: string) => void;
+  setLastUpdatedAt: (value: number) => void;
   setNotice: (value: string) => void;
   setState: (value: DashboardState | null | ((prev: DashboardState | null) => DashboardState | null)) => void;
 }) {
@@ -84,6 +113,7 @@ async function commitAction(context: {
   setBusy: (value: boolean) => void;
   setCommitMessage: (value: string) => void;
   setError: (value: string) => void;
+  setLastUpdatedAt: (value: number) => void;
   setNotice: (value: string) => void;
   setState: (value: DashboardState | null | ((prev: DashboardState | null) => DashboardState | null)) => void;
 }) {
@@ -95,6 +125,7 @@ async function executeAction(
   context: {
     setBusy: (value: boolean) => void;
     setError: (value: string) => void;
+    setLastUpdatedAt: (value: number) => void;
     setNotice: (value: string) => void;
     setState: (value: DashboardState | null | ((prev: DashboardState | null) => DashboardState | null)) => void;
   },
@@ -109,6 +140,7 @@ async function executeAction(
   try {
     const nextState = await action();
     startTransition(() => context.setState(nextState));
+    context.setLastUpdatedAt(Date.now());
     if (successNotice) {
       context.setNotice(successNotice);
     }
@@ -119,9 +151,15 @@ async function executeAction(
   }
 }
 
-function filterEntries(entries: DiffEntry[], filter: DiffFilter) {
-  if (filter === "all") {
-    return entries;
-  }
-  return entries.filter((entry) => entry.kind === filter);
+function filterEntries(entries: DiffEntry[], filter: DiffFilter, searchTerm: string) {
+  const normalizedQuery = searchTerm.trim().toLowerCase();
+  return entries.filter((entry) => {
+    if (filter !== "all" && entry.kind !== filter) {
+      return false;
+    }
+    if (!normalizedQuery) {
+      return true;
+    }
+    return [entry.path, entry.kind, entry.rule].some((value) => value.toLowerCase().includes(normalizedQuery));
+  });
 }

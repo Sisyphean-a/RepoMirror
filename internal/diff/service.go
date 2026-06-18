@@ -10,7 +10,7 @@ import (
 
 type GitInspector interface {
 	ListSyncableSourcePaths(repoPath string) ([]string, error)
-	IgnoredPaths(repoPath string, paths []string) (map[string]bool, error)
+	IgnoredPaths(repoPath string, paths []string) (map[string]string, error)
 }
 
 type Service struct {
@@ -59,7 +59,7 @@ func (s *Service) collectEntries(
 	request Request,
 	sourceFiles []string,
 	targetFiles []string,
-	ignored map[string]bool,
+	ignored map[string]string,
 ) ([]model.DiffEntry, error) {
 	entries := make([]model.DiffEntry, 0)
 	sourceSet := make(map[string]bool, len(sourceFiles))
@@ -74,7 +74,15 @@ func (s *Service) collectEntries(
 		}
 	}
 	for _, relPath := range targetFiles {
-		if sourceSet[relPath] || ignored[relPath] || isProtected(relPath) {
+		if sourceSet[relPath] || isProtected(relPath) {
+			continue
+		}
+		if rule, isIgnored := ignored[relPath]; isIgnored {
+			entry, err := s.protectedEntry(fullPath(request.TargetRoot, relPath), relPath, rule)
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, entry)
 			continue
 		}
 		entries = append(entries, model.DiffEntry{Path: relPath, Kind: model.DiffKindDeleted})
@@ -85,10 +93,17 @@ func (s *Service) collectEntries(
 func (s *Service) diffFromSourceFile(
 	request Request,
 	relPath string,
-	ignored map[string]bool,
+	ignored map[string]string,
 ) (*model.DiffEntry, error) {
-	if ignored[relPath] || isProtected(relPath) {
+	if isProtected(relPath) {
 		return nil, nil
+	}
+	if rule, isIgnored := ignored[relPath]; isIgnored {
+		entry, err := s.protectedEntry(fullPath(request.SourceRoot, relPath), relPath, rule)
+		if err != nil {
+			return nil, err
+		}
+		return &entry, nil
 	}
 	targetPath := fullPath(request.TargetRoot, relPath)
 	exists, err := s.fs.Exists(targetPath)
@@ -96,7 +111,7 @@ func (s *Service) diffFromSourceFile(
 		return nil, err
 	}
 	if !exists {
-		return &model.DiffEntry{Path: relPath, Kind: model.DiffKindAdded}, nil
+		return s.sizedEntry(fullPath(request.SourceRoot, relPath), relPath, model.DiffKindAdded)
 	}
 	equal, err := s.fs.FilesEqual(fullPath(request.SourceRoot, relPath), targetPath)
 	if err != nil {
@@ -105,9 +120,30 @@ func (s *Service) diffFromSourceFile(
 	if equal {
 		return nil, nil
 	}
-	return &model.DiffEntry{Path: relPath, Kind: model.DiffKindModified}, nil
+	return s.sizedEntry(fullPath(request.SourceRoot, relPath), relPath, model.DiffKindModified)
 }
 
 func fullPath(root string, relPath string) string {
 	return filepath.Join(root, filepath.FromSlash(relPath))
+}
+
+func (s *Service) sizedEntry(path string, relPath string, kind model.DiffKind) (*model.DiffEntry, error) {
+	sizeBytes, err := s.fs.FileSize(path)
+	if err != nil {
+		return nil, err
+	}
+	return &model.DiffEntry{Path: relPath, Kind: kind, SizeBytes: sizeBytes}, nil
+}
+
+func (s *Service) protectedEntry(path string, relPath string, rule string) (model.DiffEntry, error) {
+	sizeBytes, err := s.fs.FileSize(path)
+	if err != nil {
+		return model.DiffEntry{}, err
+	}
+	return model.DiffEntry{
+		Path:      relPath,
+		Kind:      model.DiffKindProtected,
+		Rule:      rule,
+		SizeBytes: sizeBytes,
+	}, nil
 }

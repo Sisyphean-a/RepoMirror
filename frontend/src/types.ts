@@ -1,6 +1,6 @@
 export type Direction = "A_TO_B" | "B_TO_A";
 export type RepositorySlot = "A" | "B";
-export type DiffKind = "added" | "modified" | "deleted";
+export type DiffKind = "added" | "modified" | "deleted" | "protected";
 export type DiffFilter = "all" | DiffKind;
 
 export interface AppConfig {
@@ -18,6 +18,10 @@ export interface RepositorySummary {
   isConfigured: boolean;
   isGitRepo: boolean;
   validationError: string;
+  branch: string;
+  isClean: boolean;
+  modifiedCount: number;
+  untrackedCount: number;
 }
 
 export interface TargetRepositoryStatus {
@@ -34,6 +38,8 @@ export interface TargetRepositoryStatus {
 export interface DiffEntry {
   path: string;
   kind: DiffKind;
+  rule: string;
+  sizeBytes: number;
 }
 
 export interface DiffSummary {
@@ -41,6 +47,7 @@ export interface DiffSummary {
   added: number;
   modified: number;
   deleted: number;
+  protected: number;
 }
 
 export interface DashboardState {
@@ -56,7 +63,15 @@ export interface DashboardState {
 }
 
 export const diffKindLabel: Record<DiffKind, string> = {
-  added: "新增",
-  modified: "修改",
-  deleted: "删除",
+  added: "Added",
+  modified: "Modified",
+  deleted: "Deleted",
+  protected: "Protected",
+};
+
+export const diffKindCode: Record<DiffKind, string> = {
+  added: "A",
+  modified: "M",
+  deleted: "D",
+  protected: "P",
 };

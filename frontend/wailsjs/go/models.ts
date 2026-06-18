@@ -51,6 +51,7 @@ export namespace model {
 	    added: number;
 	    modified: number;
 	    deleted: number;
+	    protected: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new DiffSummary(source);
@@ -62,11 +63,14 @@ export namespace model {
 	        this.added = source["added"];
 	        this.modified = source["modified"];
 	        this.deleted = source["deleted"];
+	        this.protected = source["protected"];
 	    }
 	}
 	export class DiffEntry {
 	    path: string;
 	    kind: string;
+	    rule: string;
+	    sizeBytes: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new DiffEntry(source);
@@ -76,6 +80,8 @@ export namespace model {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
 	        this.kind = source["kind"];
+	        this.rule = source["rule"];
+	        this.sizeBytes = source["sizeBytes"];
 	    }
 	}
 	export class RepositorySummary {
@@ -85,6 +91,10 @@ export namespace model {
 	    isConfigured: boolean;
 	    isGitRepo: boolean;
 	    validationError: string;
+	    branch: string;
+	    isClean: boolean;
+	    modifiedCount: number;
+	    untrackedCount: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new RepositorySummary(source);
@@ -98,6 +108,10 @@ export namespace model {
 	        this.isConfigured = source["isConfigured"];
 	        this.isGitRepo = source["isGitRepo"];
 	        this.validationError = source["validationError"];
+	        this.branch = source["branch"];
+	        this.isClean = source["isClean"];
+	        this.modifiedCount = source["modifiedCount"];
+	        this.untrackedCount = source["untrackedCount"];
 	    }
 	}
 	export class DashboardState {
