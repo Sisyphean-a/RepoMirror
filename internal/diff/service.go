@@ -77,12 +77,7 @@ func (s *Service) collectEntries(
 		if sourceSet[relPath] || isProtected(relPath) {
 			continue
 		}
-		if rule, isIgnored := ignored[relPath]; isIgnored {
-			entry, err := s.protectedEntry(fullPath(request.TargetRoot, relPath), relPath, rule)
-			if err != nil {
-				return nil, err
-			}
-			entries = append(entries, entry)
+		if _, isIgnored := ignored[relPath]; isIgnored {
 			continue
 		}
 		entries = append(entries, model.DiffEntry{Path: relPath, Kind: model.DiffKindDeleted})
@@ -98,12 +93,8 @@ func (s *Service) diffFromSourceFile(
 	if isProtected(relPath) {
 		return nil, nil
 	}
-	if rule, isIgnored := ignored[relPath]; isIgnored {
-		entry, err := s.protectedEntry(fullPath(request.SourceRoot, relPath), relPath, rule)
-		if err != nil {
-			return nil, err
-		}
-		return &entry, nil
+	if _, isIgnored := ignored[relPath]; isIgnored {
+		return nil, nil
 	}
 	targetPath := fullPath(request.TargetRoot, relPath)
 	exists, err := s.fs.Exists(targetPath)
@@ -133,17 +124,4 @@ func (s *Service) sizedEntry(path string, relPath string, kind model.DiffKind) (
 		return nil, err
 	}
 	return &model.DiffEntry{Path: relPath, Kind: kind, SizeBytes: sizeBytes}, nil
-}
-
-func (s *Service) protectedEntry(path string, relPath string, rule string) (model.DiffEntry, error) {
-	sizeBytes, err := s.fs.FileSize(path)
-	if err != nil {
-		return model.DiffEntry{}, err
-	}
-	return model.DiffEntry{
-		Path:      relPath,
-		Kind:      model.DiffKindProtected,
-		Rule:      rule,
-		SizeBytes: sizeBytes,
-	}, nil
 }

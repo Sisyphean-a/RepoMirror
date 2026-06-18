@@ -1,6 +1,6 @@
 import type { DiffSummary, TargetRepositoryStatus } from "../types";
-import { BranchIcon, CommitIcon, PushIcon, SyncIcon, WarningIcon } from "./Icons";
-import { commitHelperText, repoStateLabel, targetNotice } from "./ui";
+import { BranchIcon, CommitIcon, PushIcon, SyncIcon } from "./Icons";
+import { commitHelperText, repoStateLabel } from "./ui";
 
 interface TargetStatusPanelProps {
   status: TargetRepositoryStatus;
@@ -21,7 +21,7 @@ export function TargetStatusPanel(props: TargetStatusPanelProps) {
   return (
     <section className="target-panel">
       <div className="target-header">
-        <span className="panel-title">Target</span>
+        <span className="panel-title">目标仓库</span>
         <span className="target-slot">{props.targetSlot}</span>
       </div>
       <TargetBody props={props} />
@@ -37,8 +37,6 @@ function TargetBody({ props }: { props: TargetStatusPanelProps }) {
       <TargetRepoSummary status={props.status} />
       <div className="target-divider" />
       <SyncSummarySection summary={props.summary} />
-      <div className="target-divider" />
-      <TargetWarning status={props.status} />
       <CommitSection
         commitMessage={props.commitMessage}
         helperText={actionState.helperText}
@@ -59,13 +57,13 @@ function TargetBody({ props }: { props: TargetStatusPanelProps }) {
 function TargetRepoSummary({ status }: { status: TargetRepositoryStatus }) {
   const branch = status.isGitRepo ? status.branch || "HEAD" : "—";
   const changeSummary = status.isGitRepo
-    ? `${status.modifiedCount} unstaged · ${status.untrackedCount} untracked`
-    : "status unavailable";
+    ? `${status.modifiedCount} 个未暂存 · ${status.untrackedCount} 个未跟踪`
+    : "状态不可用";
 
   return (
     <div className="target-summary-block">
       <div className="target-repo-line">
-        <span className="target-name">{status.name || "target-repo"}</span>
+        <span className="target-name">{status.name || "目标仓库"}</span>
         <span className={`target-dirty ${status.isClean ? "ok" : "warn"}`}>{repoStateLabel(status)}</span>
       </div>
       <div className="target-meta-line">
@@ -82,20 +80,10 @@ function TargetRepoSummary({ status }: { status: TargetRepositoryStatus }) {
 function SyncSummarySection({ summary }: { summary: DiffSummary }) {
   return (
     <div className="summary-section">
-      <div className="section-label">Sync Summary</div>
-      <SummaryRow symbol="+" count={summary.added} label="added" tone="added" />
-      <SummaryRow symbol="~" count={summary.modified} label="modified" tone="modified" />
-      <SummaryRow symbol="−" count={summary.deleted} label="deleted" tone="deleted" />
-      <SummaryRow symbol="" count={summary.protected} label="protected" tone="protected" />
-    </div>
-  );
-}
-
-function TargetWarning({ status }: { status: TargetRepositoryStatus }) {
-  return (
-    <div className="warning-strip">
-      <WarningIcon className="warning-icon" />
-      <span>{targetNotice(status)}</span>
+      <div className="section-label">同步摘要</div>
+      <SummaryRow symbol="+" count={summary.added} label="新增" tone="added" />
+      <SummaryRow symbol="~" count={summary.modified} label="修改" tone="modified" />
+      <SummaryRow symbol="−" count={summary.deleted} label="删除" tone="deleted" />
     </div>
   );
 }
@@ -111,10 +99,10 @@ function CommitSection({
 }) {
   return (
     <div className="commit-section">
-      <div className="section-label">Commit Message</div>
+      <div className="section-label">提交信息</div>
       <textarea
         className="commit-textarea"
-        placeholder="chore: mirror sync from source"
+        placeholder="chore: 从源仓库同步"
         value={commitMessage}
         onChange={(event) => onCommitMessageChange(event.target.value)}
       />
@@ -142,16 +130,16 @@ function TargetActions({
     <div className="target-actions">
       <button className="sync-button" disabled={syncDisabled} onClick={onSync} type="button">
         <SyncIcon className="button-icon" />
-        <span>Sync</span>
+        <span>同步</span>
       </button>
       <div className="secondary-actions">
         <button className="secondary-button" disabled={commitDisabled} onClick={onCommit} type="button">
           <CommitIcon className="button-icon" />
-          <span>Commit</span>
+          <span>提交</span>
         </button>
         <button className="secondary-button" disabled={disableActions} onClick={onPush} type="button">
           <PushIcon className="button-icon" />
-          <span>Push</span>
+          <span>推送</span>
         </button>
       </div>
     </div>
@@ -184,7 +172,7 @@ function SummaryRow({
   symbol: string;
   count: number;
   label: string;
-  tone: "added" | "modified" | "deleted" | "protected";
+  tone: "added" | "modified" | "deleted";
 }) {
   return (
     <div className="summary-row">

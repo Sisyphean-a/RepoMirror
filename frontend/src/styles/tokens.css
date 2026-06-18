@@ -9,9 +9,9 @@
   --border-soft: #141e28;
   --border-strong: #26313d;
   --text-main: #c9d1d9;
-  --text-dim: #8b949e;
-  --text-muted: #4d6172;
-  --text-faint: #2e3e4e;
+  --text-dim: #9eacb8;
+  --text-muted: #728293;
+  --text-faint: #566878;
   --text-warning: #8b7030;
   --text-success: #39d98a;
   --text-modified: #c9a227;
@@ -59,8 +59,8 @@
 
 .icon-button,
 .repo-select-button {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border: 0;
   border-radius: 5px;
   background: transparent;
@@ -86,18 +86,18 @@
 }
 
 .action-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.inline-icon {
   width: 12px;
   height: 12px;
 }
 
-.inline-icon {
+.tiny-icon {
   width: 10px;
   height: 10px;
-}
-
-.tiny-icon {
-  width: 9px;
-  height: 9px;
 }
 
 .subtle-icon,

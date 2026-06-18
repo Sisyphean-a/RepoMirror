@@ -1,5 +1,5 @@
 .status-bar {
-  height: 26px;
+  min-height: 30px;
   padding: 0 16px;
   border-top: 1px solid var(--border-soft);
   background: var(--panel-shell);
@@ -11,8 +11,8 @@
 
 .status-meta {
   gap: 6px;
-  color: var(--text-faint);
-  font: 400 10px/15px var(--font-mono);
+  color: var(--text-dim);
+  font: 500 11px/16px var(--font-mono);
   white-space: nowrap;
 }
 
@@ -29,6 +29,6 @@
 }
 
 .status-icon {
-  width: 9px;
-  height: 9px;
+  width: 11px;
+  height: 11px;
 }

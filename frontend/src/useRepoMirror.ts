@@ -160,6 +160,6 @@ function filterEntries(entries: DiffEntry[], filter: DiffFilter, searchTerm: str
     if (!normalizedQuery) {
       return true;
     }
-    return [entry.path, entry.kind, entry.rule].some((value) => value.toLowerCase().includes(normalizedQuery));
+    return [entry.path, entry.kind].some((value) => value.toLowerCase().includes(normalizedQuery));
   });
 }

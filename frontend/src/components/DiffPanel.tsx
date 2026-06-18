@@ -1,7 +1,7 @@
 import type { DiffEntry, DiffFilter, DiffSummary } from "../types";
 import { diffKindCode, diffKindLabel } from "../types";
 import { SearchIcon } from "./Icons";
-import { diffKindTone, formatSize, isDisabledAction } from "./ui";
+import { diffKindTone, formatSize } from "./ui";
 
 interface DiffPanelProps {
   filter: DiffFilter;
@@ -41,7 +41,7 @@ function DiffPanelTopbar({
   return (
     <div className="panel-topbar">
       <div className="panel-title-wrap">
-        <span className="panel-title">Diff Plan</span>
+        <span className="panel-title">差异列表</span>
         <span className="panel-count">
           {totalVisible} / {total}
         </span>
@@ -52,7 +52,7 @@ function DiffPanelTopbar({
           className="search-input"
           value={searchTerm}
           onChange={(event) => onSearchTermChange(event.target.value)}
-          placeholder="path / type / rule..."
+          placeholder="搜索路径或类型"
           type="text"
         />
       </label>
@@ -71,11 +71,10 @@ function DiffFilterBar({
 }) {
   return (
     <div className="filter-bar">
-      {renderFilterButton("all", "All", summary.total, filter, onFilterChange)}
-      {renderFilterButton("added", "Added", summary.added, filter, onFilterChange)}
-      {renderFilterButton("modified", "Modified", summary.modified, filter, onFilterChange)}
-      {renderFilterButton("deleted", "Deleted", summary.deleted, filter, onFilterChange)}
-      {renderFilterButton("protected", "Protected", summary.protected, filter, onFilterChange)}
+      {renderFilterButton("all", "全部", summary.total, filter, onFilterChange)}
+      {renderFilterButton("added", "新增", summary.added, filter, onFilterChange)}
+      {renderFilterButton("modified", "修改", summary.modified, filter, onFilterChange)}
+      {renderFilterButton("deleted", "删除", summary.deleted, filter, onFilterChange)}
     </div>
   );
 }
@@ -86,7 +85,7 @@ function DiffTable({ rows }: { rows: DiffEntry[] }) {
       <div className="table-wrap">
         <TableHeader />
         <div className="table-body">
-          <div className="empty-table">No files match the current filter.</div>
+          <div className="empty-table">当前筛选下没有差异文件</div>
         </div>
       </div>
     );
@@ -105,22 +104,15 @@ function DiffTable({ rows }: { rows: DiffEntry[] }) {
 function TableHeader() {
   return (
     <div className="table-header">
-      <span className="col-type">Type</span>
-      <span className="col-path">Path</span>
-      <span className="col-rule">Rule</span>
-      <span className="col-size">Size</span>
+      <span className="col-type">类型</span>
+      <span className="col-path">路径</span>
+      <span className="col-size">大小</span>
     </div>
   );
 }
 
 function DiffRow({ entry, alt }: { entry: DiffEntry; alt: boolean }) {
-  const pathClassName = [
-    "path-cell",
-    entry.kind === "deleted" ? "deleted" : "",
-    isDisabledAction(entry.kind) ? "protected" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const pathClassName = ["path-cell", entry.kind === "deleted" ? "deleted" : ""].filter(Boolean).join(" ");
 
   return (
     <div className={`table-row ${alt ? "alt" : ""}`}>
@@ -128,7 +120,6 @@ function DiffRow({ entry, alt }: { entry: DiffEntry; alt: boolean }) {
       <span className={pathClassName} title={entry.path}>
         {entry.path}
       </span>
-      <span className={`rule-cell ${entry.rule ? "visible" : ""}`}>{entry.rule || "—"}</span>
       <span className="size-cell">{formatSize(entry.sizeBytes)}</span>
     </div>
   );

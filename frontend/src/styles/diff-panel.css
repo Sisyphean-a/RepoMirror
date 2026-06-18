@@ -8,8 +8,8 @@
 
 .panel-topbar,
 .target-header {
-  height: 38px;
-  padding: 0 16px;
+  min-height: 44px;
+  padding: 0 18px;
   border-bottom: 1px solid var(--border-main);
   background: var(--panel-alt);
   display: flex;
@@ -26,30 +26,30 @@
 .panel-title,
 .target-slot {
   color: var(--text-main);
-  font: 600 11px/16.5px var(--font-sans);
-  letter-spacing: 0.11px;
+  font: 600 14px/20px var(--font-sans);
+  letter-spacing: 0.12px;
 }
 
 .panel-count {
-  color: #3d4d5c;
-  font: 400 11px/16.5px var(--font-mono);
+  color: var(--text-dim);
+  font: 500 12px/18px var(--font-mono);
 }
 
 .search-box {
-  width: 210px;
-  height: 26px;
-  padding: 0 10px;
+  width: 260px;
+  height: 32px;
+  padding: 0 12px;
   border: 1px solid var(--border-main);
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--panel-shell);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .search-icon {
-  width: 11px;
-  height: 11px;
+  width: 13px;
+  height: 13px;
   color: var(--text-muted);
 }
 
@@ -59,7 +59,7 @@
   outline: 0;
   background: transparent;
   color: var(--text-main);
-  font: 400 11px/16.5px var(--font-sans);
+  font: 500 12px/18px var(--font-sans);
 }
 
 .search-input::placeholder {
@@ -67,8 +67,8 @@
 }
 
 .filter-bar {
-  min-height: 32px;
-  padding: 4px 12px 5px;
+  min-height: 40px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--border-soft);
   background: var(--panel-top);
   display: flex;
@@ -77,16 +77,16 @@
 }
 
 .filter-pill {
-  height: 22px;
-  padding: 0 10px;
+  height: 28px;
+  padding: 0 12px;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 6px;
   background: transparent;
-  color: #3d4d5c;
-  font: 500 11px/16.5px var(--font-sans);
+  color: var(--text-dim);
+  font: 600 12px/18px var(--font-sans);
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   cursor: pointer;
 }
 
@@ -101,8 +101,8 @@
 }
 
 .filter-count {
-  color: #2a3a4a;
-  font: 500 10px/15px var(--font-mono);
+  color: var(--text-muted);
+  font: 500 11px/16px var(--font-mono);
 }
 
 .table-wrap {
@@ -114,27 +114,25 @@
 }
 
 .table-header {
-  min-height: 26px;
+  min-height: 34px;
   background: var(--panel-shell);
-  color: var(--text-faint);
+  color: var(--text-dim);
   border-bottom: 1px solid var(--border-soft);
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 100px 70px;
-  font: 600 9.5px/14.25px var(--font-sans);
-  letter-spacing: 0.855px;
-  text-transform: uppercase;
+  grid-template-columns: 44px minmax(0, 1fr) 72px;
+  font: 600 11px/16px var(--font-sans);
+  letter-spacing: 0.2px;
 }
 
 .table-header > span {
-  padding-top: 4.63px;
+  padding-top: 8px;
 }
 
 .col-type {
   text-align: center;
 }
 
-.col-path,
-.col-rule {
+.col-path {
   padding-left: 6px;
 }
 
@@ -150,11 +148,11 @@
 }
 
 .table-row {
-  min-height: 28px;
+  min-height: 35px;
   align-items: center;
   background: var(--panel-main);
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 100px 70px;
+  grid-template-columns: 44px minmax(0, 1fr) 72px;
 }
 
 .table-row.alt {
@@ -162,14 +160,14 @@
 }
 
 .type-badge {
-  width: 18px;
-  height: 16px;
-  margin-left: 13px;
+  width: 20px;
+  height: 18px;
+  margin-left: 11px;
   border-radius: 3px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font: 700 10px/15px var(--font-mono);
+  font: 700 11px/16px var(--font-mono);
 }
 
 .type-badge.added {
@@ -193,9 +191,8 @@
 }
 
 .path-cell,
-.rule-cell,
 .size-cell {
-  font: 400 11.5px/17.25px var(--font-mono);
+  font: 500 12px/18px var(--font-mono);
 }
 
 .path-cell {
@@ -206,35 +203,20 @@
 }
 
 .path-cell.deleted {
-  color: #6b4040;
+  color: #d88585;
   text-decoration: line-through;
-}
-
-.path-cell.protected {
-  color: #3d4d5c;
-  opacity: 0.55;
-}
-
-.rule-cell {
-  color: #8b6910;
-  font-size: 10px;
-  line-height: 15px;
-}
-
-.rule-cell:not(.visible) {
-  color: #2a3a4a;
 }
 
 .size-cell {
   padding-right: 11px;
-  color: #3d4d5c;
-  font-size: 10.5px;
-  line-height: 15.75px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 16px;
   text-align: right;
 }
 
 .empty-table {
-  padding: 18px;
-  color: var(--text-muted);
-  font: 400 12px/18px var(--font-sans);
+  padding: 24px;
+  color: var(--text-dim);
+  font: 500 13px/20px var(--font-sans);
 }

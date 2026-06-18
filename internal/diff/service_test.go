@@ -39,12 +39,14 @@ func TestCalculateRespectsIgnoreRules(t *testing.T) {
 	assertDiffKind(t, got, "tracked.txt", model.DiffKindModified)
 	assertDiffKind(t, got, "notes.md", model.DiffKindAdded)
 	assertDiffKind(t, got, "old.txt", model.DiffKindDeleted)
-	assertDiffKind(t, got, "ignored/keep.txt", model.DiffKindProtected)
-	if result.Summary.Total != 4 {
-		t.Fatalf("expected total summary to be 4, got %+v", result.Summary)
+	if _, exists := got["ignored/keep.txt"]; exists {
+		t.Fatalf("ignored target file should not enter diff list")
 	}
-	if result.Summary.Protected != 1 {
-		t.Fatalf("expected protected summary to be 1, got %+v", result.Summary)
+	if result.Summary.Total != 3 {
+		t.Fatalf("expected total summary to be 3, got %+v", result.Summary)
+	}
+	if result.Summary.Protected != 0 {
+		t.Fatalf("expected protected summary to be 0, got %+v", result.Summary)
 	}
 }
 

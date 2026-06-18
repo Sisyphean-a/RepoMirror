@@ -48,9 +48,9 @@ function HeaderTopBar({
         <span className="direction-pill">
           {sourceSlot} → {targetSlot}
         </span>
-        <span className="top-repo muted">{sourceRepo.name || "source"}</span>
+        <span className="top-repo muted">{sourceRepo.name || "源仓库"}</span>
         <ArrowSplitIcon className="inline-icon subtle-icon" />
-        <span className="top-repo strong">{targetRepo.name || "target"}</span>
+        <span className="top-repo strong">{targetRepo.name || "目标仓库"}</span>
       </div>
       <div className="top-spacer" />
       <BranchStatus targetRepo={targetRepo} />

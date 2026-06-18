@@ -12,7 +12,9 @@ interface RepoFieldProps {
 export function RepoField({ label, repository, isTarget, onSelect }: RepoFieldProps) {
   const branch = repository.isGitRepo ? repository.branch || "HEAD" : "—";
   const tone = repoStateTone(repository);
-  const path = repository.path || "Select git repository";
+  const path = repository.path || "未选择 Git 仓库";
+  const selectLabel = repository.isConfigured ? "更换仓库" : "选择仓库";
+  const buttonTone = repository.isConfigured ? "configured" : "empty";
 
   return (
     <div className="repo-row">
@@ -30,9 +32,10 @@ export function RepoField({ label, repository, isTarget, onSelect }: RepoFieldPr
         <span className="repo-state-dot" />
         <span className="repo-state-label">{repoStateLabel(repository)}</span>
       </div>
-      {isTarget ? <div className="repo-target-tag">target</div> : null}
-      <button className="repo-select-button" onClick={() => onSelect(repository.slot)} type="button">
+      {isTarget ? <div className="repo-target-tag">目标</div> : null}
+      <button className={`repo-select-button ${buttonTone}`} onClick={() => onSelect(repository.slot)} type="button">
         <FolderIcon className="tiny-icon" />
+        <span className="repo-select-text">{selectLabel}</span>
       </button>
     </div>
   );

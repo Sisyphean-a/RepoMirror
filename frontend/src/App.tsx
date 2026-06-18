@@ -68,7 +68,7 @@ function Dashboard(viewModel: ReturnType<typeof useRepoMirror>) {
 }
 
 function LoadingScreen({ error }: { error: string }) {
-  return <div className="loading-screen">{error || "Scanning repository state..."}</div>;
+  return <div className="loading-screen">{error || "正在扫描仓库状态..."}</div>;
 }
 
 export default App;

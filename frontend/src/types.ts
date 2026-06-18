@@ -63,10 +63,10 @@ export interface DashboardState {
 }
 
 export const diffKindLabel: Record<DiffKind, string> = {
-  added: "Added",
-  modified: "Modified",
-  deleted: "Deleted",
-  protected: "Protected",
+  added: "新增",
+  modified: "修改",
+  deleted: "删除",
+  protected: "受保护",
 };
 
 export const diffKindCode: Record<DiffKind, string> = {

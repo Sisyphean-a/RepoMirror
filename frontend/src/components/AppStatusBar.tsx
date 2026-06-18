@@ -11,11 +11,11 @@ export function AppStatusBar({ error, notice, lastUpdatedAt }: AppStatusBarProps
   return (
     <footer className="status-bar">
       <div className="status-meta">
-        <span>skip .git</span>
+        <span>跳过 .git</span>
         <span className="status-dot">·</span>
-        <span>skip .gitignore</span>
+        <span>跳过 .gitignore</span>
         <span className="status-dot">·</span>
-        <span>respect target ignore</span>
+        <span>遵守目标仓库忽略规则</span>
       </div>
       <div className="status-meta">
         <ClockIcon className="status-icon" />
@@ -23,7 +23,7 @@ export function AppStatusBar({ error, notice, lastUpdatedAt }: AppStatusBarProps
       </div>
       <div className={`status-meta ${error ? "error" : notice ? "success" : ""}`}>
         <SaveIcon className="status-icon" />
-        <span>{error || notice || "ready"}</span>
+        <span>{error || notice || "就绪"}</span>
       </div>
     </footer>
   );
