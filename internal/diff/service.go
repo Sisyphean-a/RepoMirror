@@ -152,16 +152,39 @@ func (s *Service) resolveComparedEntries(
 	var resultErr error
 	var errOnce sync.Once
 
-	waitGroup.Add(max(0, workerCount-1))
-	for worker := 0; worker < workerCount-1; worker++ {
-		go func(worker int) {
-			s.resolveComparedEntryRange(request, ignored, resolved, worker, workerCount, &resultErr, &errOnce)
-			waitGroup.Done()
-		}(worker)
-	}
+	s.startComparedEntryWorkers(request, ignored, resolved, workerCount, &waitGroup, &resultErr, &errOnce)
 	s.resolveComparedEntryRange(request, ignored, resolved, workerCount-1, workerCount, &resultErr, &errOnce)
 	waitGroup.Wait()
 	return resultErr
+}
+
+func (s *Service) startComparedEntryWorkers(
+	request Request,
+	ignored map[string]struct{},
+	resolved []model.DiffEntry,
+	workerCount int,
+	waitGroup *sync.WaitGroup,
+	resultErr *error,
+	errOnce *sync.Once,
+) {
+	waitGroup.Add(max(0, workerCount-1))
+	for worker := 0; worker < workerCount-1; worker++ {
+		go s.resolveComparedEntryWorker(request, ignored, resolved, worker, workerCount, waitGroup, resultErr, errOnce)
+	}
+}
+
+func (s *Service) resolveComparedEntryWorker(
+	request Request,
+	ignored map[string]struct{},
+	resolved []model.DiffEntry,
+	worker int,
+	workerCount int,
+	waitGroup *sync.WaitGroup,
+	resultErr *error,
+	errOnce *sync.Once,
+) {
+	s.resolveComparedEntryRange(request, ignored, resolved, worker, workerCount, resultErr, errOnce)
+	waitGroup.Done()
 }
 
 func (s *Service) resolveComparedEntryRange(

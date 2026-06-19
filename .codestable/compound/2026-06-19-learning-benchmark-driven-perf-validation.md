@@ -469,3 +469,34 @@ profile 直觉上像是在用更便宜的原语替代热点判断，但 `Benchma
 1. 这种展开只适合“契约明确、目标字符单一、代码仍短小可读”的热点。
 2. 不要一上来就用更激进的 SIMD 风格改写，先试 2/4 步这种可维护的受控展开。
 3. 展开类优化很容易只是在吃 benchmark 噪声，所以必须做同 session 的候选/基线对照，不能只看单边结果。
+
+# goroutine 闭包可以换成专用 worker 方法，直接吃分配收益
+
+当热点函数里需要批量起 goroutine，而每个 goroutine 做的事高度固定时，可以先试把“循环里的匿名闭包”拆成专用 worker 方法。它不一定让 CPU 明显更快，但经常能直接减少闭包环境分配。
+
+这次在 `internal/diff/service.go` 的 `resolveComparedEntries` 上，原实现每个 worker 都是：
+
+1. 在循环里创建匿名 goroutine
+2. 捕获 `request`、`ignored`、`resolved`、`workerCount`、`waitGroup`、`resultErr`、`errOnce`
+3. 调 `resolveComparedEntryRange(...)`
+4. 手动 `waitGroup.Done()`
+
+把它改成：
+
+1. `startComparedEntryWorkers(...)` 负责批量启动
+2. 每个 goroutine 直接调用 `resolveComparedEntryWorker(...)`
+3. worker 方法内部串好 `resolveComparedEntryRange(...) + waitGroup.Done()`
+
+同 session 5 次 benchmark 结果：
+
+- `BenchmarkCalculateLargeDiff`
+- candidate: `345374-345399 B/op`, `19 allocs/op`
+- baseline: `345426-345445 B/op`, `26 allocs/op`
+
+CPU 仍然有抖动，但这条改动的主要收益不是 `ns/op`，而是把稳定的分配次数直接砍掉了 7 次；同时 `BenchmarkMergedPathCount` 也没有被拖坏。
+
+要点是：
+
+1. 对并发热点，匿名闭包本身就是一个可测的分配来源，不要只盯业务循环体。
+2. 这类优化优先看 `allocs/op` 是否稳定下降，再看 CPU 是否至少不变坏。
+3. 如果只是把闭包换成 helper，却引入了额外接口层或更多共享状态，就未必划算；要像这次一样保持调用链非常短。
