@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type UIEvent } from "react";
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import type { DiffEntry, DiffFilter, DiffSummary } from "../types";
 import { diffKindCode, diffKindLabel } from "../types";
 import { SearchIcon } from "./Icons";
@@ -21,28 +21,36 @@ interface ViewportMetrics {
 }
 
 interface DiffPanelProps {
-  filter: DiffFilter;
   summary: DiffSummary;
   entries: DiffEntry[];
-  searchTerm: string;
-  onFilterChange: (filter: DiffFilter) => void;
-  onSearchTermChange: (value: string) => void;
 }
 
-export function DiffPanel(props: DiffPanelProps) {
+export const DiffPanel = memo(function DiffPanel(props: DiffPanelProps) {
+  const [filter, setFilter] = useState<DiffFilter>("all");
+  const [searchTerm, setSearchTerm] = useState("");
+  const deferredSearchTerm = useDeferredValue(searchTerm);
+  const normalizedQuery = useMemo(
+    () => deferredSearchTerm.trim().toLowerCase(),
+    [deferredSearchTerm],
+  );
+  const visibleEntries = useMemo(
+    () => filterVisibleEntries(props.entries, filter, normalizedQuery),
+    [props.entries, filter, normalizedQuery],
+  );
+
   return (
     <section className="diff-panel">
       <DiffPanelTopbar
-        totalVisible={props.entries.length}
+        totalVisible={visibleEntries.length}
         total={props.summary.total}
-        searchTerm={props.searchTerm}
-        onSearchTermChange={props.onSearchTermChange}
+        searchTerm={searchTerm}
+        onSearchTermChange={setSearchTerm}
       />
-      <DiffFilterBar filter={props.filter} summary={props.summary} onFilterChange={props.onFilterChange} />
-      <DiffTable rows={props.entries} />
+      <DiffFilterBar filter={filter} summary={props.summary} onFilterChange={setFilter} />
+      <DiffTable rows={visibleEntries} />
     </section>
   );
-}
+});
 
 function DiffPanelTopbar({
   totalVisible,
@@ -77,7 +85,7 @@ function DiffPanelTopbar({
   );
 }
 
-function DiffFilterBar({
+const DiffFilterBar = memo(function DiffFilterBar({
   filter,
   summary,
   onFilterChange,
@@ -94,9 +102,9 @@ function DiffFilterBar({
       {renderFilterButton("deleted", "删除", summary.deleted, filter, onFilterChange)}
     </div>
   );
-}
+});
 
-function DiffTable({ rows }: { rows: DiffEntry[] }) {
+const DiffTable = memo(function DiffTable({ rows }: { rows: DiffEntry[] }) {
   if (rows.length === 0) {
     return (
       <div className="table-wrap">
@@ -114,19 +122,20 @@ function DiffTable({ rows }: { rows: DiffEntry[] }) {
       <VirtualizedDiffBody rows={rows} />
     </div>
   );
-}
+});
 
 function VirtualizedDiffBody({ rows }: { rows: DiffEntry[] }) {
   const { bodyRef, onScroll, range } = useVirtualRange(rows.length);
-  const visibleRows = rows.slice(range.startIndex, range.endIndex);
+  const visibleRows = [];
+  for (let index = range.startIndex; index < range.endIndex; index++) {
+    const entry = rows[index];
+    visibleRows.push(<DiffRow entry={entry} alt={index % 2 === 0} key={entry.path} />);
+  }
 
   return (
     <div className="table-body" ref={bodyRef} onScroll={onScroll}>
       <div className="virtual-rows" style={{ paddingTop: range.paddingTop, paddingBottom: range.paddingBottom }}>
-        {visibleRows.map((entry, offset) => {
-          const index = range.startIndex + offset;
-          return <DiffRow entry={entry} alt={index % 2 === 0} key={`${entry.kind}-${entry.path}`} />;
-        })}
+        {visibleRows}
       </div>
     </div>
   );
@@ -142,11 +151,11 @@ function TableHeader() {
   );
 }
 
-function DiffRow({ entry, alt }: { entry: DiffEntry; alt: boolean }) {
-  const pathClassName = ["path-cell", entry.kind === "deleted" ? "deleted" : ""].filter(Boolean).join(" ");
-
+const DiffRow = memo(function DiffRow({ entry, alt }: { entry: DiffEntry; alt: boolean }) {
+  const pathClassName = entry.kind === "deleted" ? "path-cell deleted" : "path-cell";
+  const rowClassName = alt ? "table-row alt" : "table-row";
   return (
-    <div className={`table-row ${alt ? "alt" : ""}`}>
+    <div className={rowClassName}>
       <span className={`type-badge ${diffKindTone(entry.kind)}`}>{diffKindCode[entry.kind]}</span>
       <span className={pathClassName} title={entry.path}>
         {entry.path}
@@ -154,10 +163,13 @@ function DiffRow({ entry, alt }: { entry: DiffEntry; alt: boolean }) {
       <span className="size-cell">{formatSize(entry.sizeBytes)}</span>
     </div>
   );
-}
+});
 
 function useVirtualRange(rowCount: number) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const frameRef = useRef<number | null>(null);
+  const latestScrollTopRef = useRef(0);
+  const lastVisibleStartRef = useRef(0);
   const [metrics, setMetrics] = useState<ViewportMetrics>({ scrollTop: 0, viewportHeight: 0 });
 
   useEffect(() => {
@@ -172,6 +184,14 @@ function useVirtualRange(rowCount: number) {
   }, []);
 
   useEffect(() => {
+    return () => {
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     const element = bodyRef.current;
     if (element) {
       syncViewportMetrics(element, setMetrics);
@@ -179,8 +199,21 @@ function useVirtualRange(rowCount: number) {
   }, [rowCount]);
 
   const onScroll = (event: UIEvent<HTMLDivElement>) => {
-    const scrollTop = event.currentTarget.scrollTop;
-    setMetrics((current) => (current.scrollTop === scrollTop ? current : { ...current, scrollTop }));
+    latestScrollTopRef.current = event.currentTarget.scrollTop;
+    if (frameRef.current !== null) {
+      return;
+    }
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      const nextVisibleStart = Math.floor(latestScrollTopRef.current / rowHeightPx);
+      if (lastVisibleStartRef.current === nextVisibleStart) {
+        return;
+      }
+      lastVisibleStartRef.current = nextVisibleStart;
+      setMetrics((current) =>
+        current.scrollTop === latestScrollTopRef.current ? current : { ...current, scrollTop: latestScrollTopRef.current },
+      );
+    });
   };
 
   return {
@@ -238,4 +271,24 @@ function renderFilterButton(
       <span className="filter-count">{count}</span>
     </button>
   );
+}
+
+function filterVisibleEntries(entries: DiffEntry[], kind: DiffFilter, normalizedQuery: string) {
+  if (kind === "all" && !normalizedQuery) {
+    return entries;
+  }
+  const filtered: DiffEntry[] = [];
+  const matchesAllKinds = kind === "all";
+  const hasQuery = normalizedQuery !== "";
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index];
+    if (!matchesAllKinds && entry.kind !== kind) {
+      continue;
+    }
+    if (hasQuery && !entry.path.toLowerCase().includes(normalizedQuery) && !entry.kind.includes(normalizedQuery)) {
+      continue;
+    }
+    filtered.push(entry);
+  }
+  return filtered;
 }

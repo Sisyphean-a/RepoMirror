@@ -27,14 +27,30 @@ export function formatSize(sizeBytes: number) {
 }
 
 export function formatRelativeTime(lastUpdatedAt: number) {
+  return formatRelativeTimeAt(lastUpdatedAt, Date.now());
+}
+
+export function formatRelativeTimeAt(lastUpdatedAt: number, now: number) {
   if (!lastUpdatedAt) {
     return "刚刚扫描";
   }
-  const elapsedSeconds = Math.max(0, Math.round((Date.now() - lastUpdatedAt) / 1000));
-  if (elapsedSeconds < 5) {
+  const elapsedMs = Math.max(0, now - lastUpdatedAt);
+  if (elapsedMs < 5_000) {
     return "刚刚扫描";
   }
-  return `${elapsedSeconds} 秒前扫描`;
+
+  const elapsedSeconds = Math.floor(elapsedMs / 1_000);
+  if (elapsedSeconds < 60) {
+    return `${elapsedSeconds} 秒前扫描`;
+  }
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes} 分钟前扫描`;
+  }
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  return `${elapsedHours} 小时前扫描`;
 }
 
 export function diffKindTone(kind: DiffKind) {
@@ -45,8 +61,6 @@ export function diffKindTone(kind: DiffKind) {
       return "modified";
     case "deleted":
       return "deleted";
-    case "protected":
-      return "protected";
   }
 }
 

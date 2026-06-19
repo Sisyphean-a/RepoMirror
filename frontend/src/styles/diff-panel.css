@@ -190,11 +190,6 @@
   color: #e05c5c;
 }
 
-.type-badge.protected {
-  background: transparent;
-  color: #4d6172;
-}
-
 .path-cell,
 .size-cell {
   font: 500 12px/18px var(--font-mono);

@@ -2,6 +2,7 @@ package gitops
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -9,6 +10,11 @@ import (
 )
 
 func (s *Service) ReadTargetStatus(repoPath string) (model.TargetRepositoryStatus, error) {
+	cacheKey := filepath.Clean(strings.TrimSpace(repoPath))
+	if root, ok := s.cachedRoot(cacheKey); ok {
+		return s.ReadTargetStatusFromRoot(root)
+	}
+
 	var waitGroup sync.WaitGroup
 	var root string
 	var rootErr error
@@ -31,6 +37,15 @@ func (s *Service) ReadTargetStatus(repoPath string) (model.TargetRepositoryStatu
 	}
 	if statusErr != nil {
 		return model.TargetRepositoryStatus{}, fmt.Errorf("failed to read target status: %w", statusErr)
+	}
+	s.rememberRoot(cacheKey, root)
+	return buildTargetStatus(root, statusOutput), nil
+}
+
+func (s *Service) ReadTargetStatusFromRoot(root string) (model.TargetRepositoryStatus, error) {
+	statusOutput, err := s.runner.Run(root, nil, "status", "--porcelain=2", "--branch")
+	if err != nil {
+		return model.TargetRepositoryStatus{}, fmt.Errorf("failed to read target status: %w", err)
 	}
 	return buildTargetStatus(root, statusOutput), nil
 }

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Direction, RepositorySummary, RepositorySlot } from "../types";
 import { ArrowSplitIcon, BranchIcon, RefreshIcon, RepoMirrorLogo, SettingsIcon, SwapIcon } from "./Icons";
 import { RepoField } from "./RepoField";
@@ -19,14 +20,14 @@ interface AppHeaderProps {
   onSelectRepo: (slot: RepositorySlot) => void;
 }
 
-export function AppHeader(props: AppHeaderProps) {
+export const AppHeader = memo(function AppHeader(props: AppHeaderProps) {
   return (
     <header className="app-header">
       <HeaderTopBar {...props} />
       <RepositoryBars {...props} />
     </header>
   );
-}
+});
 
 function HeaderTopBar({
   busy,

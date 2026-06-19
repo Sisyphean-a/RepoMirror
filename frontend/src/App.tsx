@@ -1,3 +1,4 @@
+import { useCallback, useMemo } from "react";
 import { AppHeader } from "./components/AppHeader";
 import { AppStatusBar } from "./components/AppStatusBar";
 import { DiffPanel } from "./components/DiffPanel";
@@ -11,10 +12,32 @@ function App() {
 }
 
 function Dashboard(viewModel: ReturnType<typeof useRepoMirror>) {
-  const { busy, busyMessage, commitMessage, error, filter, lastUpdatedAt, notice, searchTerm, visibleEntries } = viewModel;
+  const {
+    busy,
+    busyMessage,
+    changeDirection,
+    commit,
+    error,
+    lastUpdatedAt,
+    notice,
+    push,
+    refresh,
+    save,
+    selectRepo,
+    swap,
+    sync,
+  } = viewModel;
   const state = viewModel.state!;
-  const sourceRepo = state.sourceSlot === "A" ? state.repositoryA : state.repositoryB;
-  const targetRepo = state.targetSlot === "A" ? state.repositoryA : state.repositoryB;
+  const sourceRepo = useMemo(
+    () => (state.sourceSlot === "A" ? state.repositoryA : state.repositoryB),
+    [state.repositoryA, state.repositoryB, state.sourceSlot],
+  );
+  const targetRepo = useMemo(
+    () => (state.targetSlot === "A" ? state.repositoryA : state.repositoryB),
+    [state.repositoryA, state.repositoryB, state.targetSlot],
+  );
+  const toggleDirection = state.config.direction === "A_TO_B" ? "B_TO_A" : "A_TO_B";
+  const onToggleDirection = useCallback(() => void changeDirection(toggleDirection), [changeDirection, toggleDirection]);
 
   return (
     <div className="app-shell">
@@ -28,36 +51,25 @@ function Dashboard(viewModel: ReturnType<typeof useRepoMirror>) {
           repositoryB={state.repositoryB}
           sourceRepo={sourceRepo}
           targetRepo={targetRepo}
-          onRefresh={() => void viewModel.refresh()}
-          onSave={() => void viewModel.save()}
-          onSwap={() => void viewModel.swap()}
-          onToggleDirection={() =>
-            void viewModel.changeDirection(state.config.direction === "A_TO_B" ? "B_TO_A" : "A_TO_B")
-          }
-          onSelectRepo={(slot) => void viewModel.selectRepo(slot)}
+          onRefresh={refresh}
+          onSave={save}
+          onSwap={swap}
+          onToggleDirection={onToggleDirection}
+          onSelectRepo={selectRepo}
         />
 
         <main className="workspace">
-          <DiffPanel
-            filter={filter}
-            summary={state.summary}
-            entries={visibleEntries}
-            searchTerm={searchTerm}
-            onFilterChange={viewModel.setFilter}
-            onSearchTermChange={viewModel.setSearchTerm}
-          />
+          <DiffPanel summary={state.summary} entries={state.differences} />
           <TargetStatusPanel
             status={state.targetStatus}
             summary={state.summary}
             targetSlot={state.targetSlot}
             canSync={state.canSync}
             busy={busy}
-            commitMessage={commitMessage}
             error={error}
-            onCommitMessageChange={viewModel.setCommitMessage}
-            onSync={() => void viewModel.sync()}
-            onCommit={() => void viewModel.commit()}
-            onPush={() => void viewModel.push()}
+            onSync={sync}
+            onCommit={commit}
+            onPush={push}
             disableActions={busy || !state.targetStatus.isGitRepo}
           />
         </main>

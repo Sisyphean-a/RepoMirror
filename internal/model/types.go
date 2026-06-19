@@ -133,25 +133,22 @@ type TargetRepositoryStatus struct {
 type DiffKind string
 
 const (
-	DiffKindAdded     DiffKind = "added"
-	DiffKindModified  DiffKind = "modified"
-	DiffKindDeleted   DiffKind = "deleted"
-	DiffKindProtected DiffKind = "protected"
+	DiffKindAdded    DiffKind = "added"
+	DiffKindModified DiffKind = "modified"
+	DiffKindDeleted  DiffKind = "deleted"
 )
 
 type DiffEntry struct {
 	Path      string   `json:"path"`
 	Kind      DiffKind `json:"kind"`
-	Rule      string   `json:"rule"`
 	SizeBytes int64    `json:"sizeBytes"`
 }
 
 type DiffSummary struct {
-	Total     int `json:"total"`
-	Added     int `json:"added"`
-	Modified  int `json:"modified"`
-	Deleted   int `json:"deleted"`
-	Protected int `json:"protected"`
+	Total    int `json:"total"`
+	Added    int `json:"added"`
+	Modified int `json:"modified"`
+	Deleted  int `json:"deleted"`
 }
 
 func BuildDiffSummary(entries []DiffEntry) DiffSummary {
@@ -165,15 +162,9 @@ func BuildDiffSummary(entries []DiffEntry) DiffSummary {
 			summary.Modified++
 		case DiffKindDeleted:
 			summary.Deleted++
-		case DiffKindProtected:
-			summary.Protected++
 		}
 	}
 	return summary
-}
-
-func (entry DiffEntry) IsActionable() bool {
-	return entry.Kind != DiffKindProtected
 }
 
 type DashboardState struct {

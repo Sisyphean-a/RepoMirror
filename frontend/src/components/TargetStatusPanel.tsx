@@ -1,3 +1,4 @@
+import { memo, useState } from "react";
 import type { DiffSummary, TargetRepositoryStatus } from "../types";
 import { BranchIcon, CommitIcon, PushIcon, SyncIcon } from "./Icons";
 import { commitHelperText, repoStateLabel } from "./ui";
@@ -8,29 +9,41 @@ interface TargetStatusPanelProps {
   targetSlot: "A" | "B";
   canSync: boolean;
   busy: boolean;
-  commitMessage: string;
   error: string;
-  onCommitMessageChange: (value: string) => void;
   onSync: () => void;
-  onCommit: () => void;
+  onCommit: (message: string) => Promise<void>;
   onPush: () => void;
   disableActions: boolean;
 }
 
-export function TargetStatusPanel(props: TargetStatusPanelProps) {
+export const TargetStatusPanel = memo(function TargetStatusPanel(props: TargetStatusPanelProps) {
+  const [commitMessage, setCommitMessage] = useState("");
+
   return (
     <section className="target-panel">
       <div className="target-header">
         <span className="panel-title">目标仓库</span>
         <span className="target-slot">{props.targetSlot}</span>
       </div>
-      <TargetBody props={props} />
+      <TargetBody props={props} commitMessage={commitMessage} onCommitMessageChange={setCommitMessage} />
     </section>
   );
-}
+});
 
-function TargetBody({ props }: { props: TargetStatusPanelProps }) {
-  const actionState = buildActionState(props);
+function TargetBody({
+  props,
+  commitMessage,
+  onCommitMessageChange,
+}: {
+  props: TargetStatusPanelProps;
+  commitMessage: string;
+  onCommitMessageChange: (value: string) => void;
+}) {
+  const actionState = buildActionState(props, commitMessage);
+  const handleCommit = async () => {
+    await props.onCommit(commitMessage);
+    onCommitMessageChange("");
+  };
 
   return (
     <div className="target-body">
@@ -38,15 +51,15 @@ function TargetBody({ props }: { props: TargetStatusPanelProps }) {
       <div className="target-divider" />
       <SyncSummarySection summary={props.summary} />
       <CommitSection
-        commitMessage={props.commitMessage}
+        commitMessage={commitMessage}
         helperText={actionState.helperText}
-        onCommitMessageChange={props.onCommitMessageChange}
+        onCommitMessageChange={onCommitMessageChange}
       />
       <TargetActions
         commitDisabled={actionState.commitDisabled}
         disableActions={props.disableActions}
         syncDisabled={actionState.syncDisabled}
-        onCommit={props.onCommit}
+        onCommit={handleCommit}
         onPush={props.onPush}
         onSync={props.onSync}
       />
@@ -54,7 +67,7 @@ function TargetBody({ props }: { props: TargetStatusPanelProps }) {
   );
 }
 
-function TargetRepoSummary({ status }: { status: TargetRepositoryStatus }) {
+const TargetRepoSummary = memo(function TargetRepoSummary({ status }: { status: TargetRepositoryStatus }) {
   const branch = status.isGitRepo ? status.branch || "HEAD" : "—";
   const changeSummary = status.isGitRepo
     ? `${status.modifiedCount} 个未暂存 · ${status.untrackedCount} 个未跟踪`
@@ -75,9 +88,9 @@ function TargetRepoSummary({ status }: { status: TargetRepositoryStatus }) {
       </div>
     </div>
   );
-}
+});
 
-function SyncSummarySection({ summary }: { summary: DiffSummary }) {
+const SyncSummarySection = memo(function SyncSummarySection({ summary }: { summary: DiffSummary }) {
   return (
     <div className="summary-section">
       <div className="section-label">同步摘要</div>
@@ -86,7 +99,7 @@ function SyncSummarySection({ summary }: { summary: DiffSummary }) {
       <SummaryRow symbol="−" count={summary.deleted} label="删除" tone="deleted" />
     </div>
   );
-}
+});
 
 function CommitSection({
   commitMessage,
@@ -111,7 +124,7 @@ function CommitSection({
   );
 }
 
-function TargetActions({
+const TargetActions = memo(function TargetActions({
   commitDisabled,
   disableActions,
   syncDisabled,
@@ -144,7 +157,7 @@ function TargetActions({
       </div>
     </div>
   );
-}
+});
 
 interface ActionState {
   helperText: string;
@@ -152,18 +165,18 @@ interface ActionState {
   syncDisabled: boolean;
 }
 
-function buildActionState(props: TargetStatusPanelProps): ActionState {
-  const helperText = props.error || commitHelperText(props.status, props.commitMessage, props.busy);
+function buildActionState(props: TargetStatusPanelProps, commitMessage: string): ActionState {
+  const helperText = props.error || commitHelperText(props.status, commitMessage, props.busy);
   const hasPendingChanges = props.status.isGitRepo && !props.status.isClean;
 
   return {
     helperText,
-    commitDisabled: props.disableActions || !hasPendingChanges || !props.commitMessage.trim(),
+    commitDisabled: props.disableActions || !hasPendingChanges || !commitMessage.trim(),
     syncDisabled: props.busy || !props.canSync,
   };
 }
 
-function SummaryRow({
+const SummaryRow = memo(function SummaryRow({
   symbol,
   count,
   label,
@@ -181,4 +194,4 @@ function SummaryRow({
       <span className="summary-label">{label}</span>
     </div>
   );
-}
+});

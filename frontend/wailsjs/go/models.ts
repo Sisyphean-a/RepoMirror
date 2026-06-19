@@ -46,12 +46,11 @@ export namespace model {
 	        this.untrackedCount = source["untrackedCount"];
 	    }
 	}
-	export class DiffSummary {
-	    total: number;
-	    added: number;
-	    modified: number;
-	    deleted: number;
-	    protected: number;
+export class DiffSummary {
+    total: number;
+    added: number;
+    modified: number;
+    deleted: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new DiffSummary(source);
@@ -59,31 +58,28 @@ export namespace model {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.total = source["total"];
-	        this.added = source["added"];
-	        this.modified = source["modified"];
-	        this.deleted = source["deleted"];
-	        this.protected = source["protected"];
-	    }
-	}
-	export class DiffEntry {
-	    path: string;
-	    kind: string;
-	    rule: string;
-	    sizeBytes: number;
+        this.total = source["total"];
+        this.added = source["added"];
+        this.modified = source["modified"];
+        this.deleted = source["deleted"];
+    }
+}
+export class DiffEntry {
+    path: string;
+    kind: string;
+    sizeBytes: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new DiffEntry(source);
 	    }
 	
 	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.path = source["path"];
-	        this.kind = source["kind"];
-	        this.rule = source["rule"];
-	        this.sizeBytes = source["sizeBytes"];
-	    }
-	}
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.path = source["path"];
+        this.kind = source["kind"];
+        this.sizeBytes = source["sizeBytes"];
+    }
+}
 	export class RepositorySummary {
 	    slot: string;
 	    path: string;
@@ -165,4 +161,3 @@ export namespace model {
 	
 
 }
-
