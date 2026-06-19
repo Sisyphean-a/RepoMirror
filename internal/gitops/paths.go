@@ -2,6 +2,7 @@ package gitops
 
 import (
 	"bytes"
+	"strings"
 	"unsafe"
 )
 
@@ -87,11 +88,17 @@ func isProtectedPath(relPath string) bool {
 }
 
 func hasProtectedPathCandidate(relPath string) bool {
-	if relPath[0] == '.' {
-		return true
-	}
-	for index := 1; index < len(relPath)-3; index++ {
-		if !isPathSeparator(relPath[index-1]) || relPath[index] != '.' {
+	for offset := 0; offset < len(relPath)-3; {
+		index := strings.IndexByte(relPath[offset:], '.')
+		if index < 0 {
+			return false
+		}
+		index += offset
+		offset = index + 1
+		if index != 0 && !isPathSeparator(relPath[index-1]) {
+			continue
+		}
+		if !dotGitSegment(relPath, index) {
 			continue
 		}
 		return true

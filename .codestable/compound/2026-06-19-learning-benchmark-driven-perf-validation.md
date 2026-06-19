@@ -79,3 +79,19 @@ tags:
 - baseline: `average 182023.4 ns/op`, `median 195249.5 ns/op`
 
 这种成对对照比“改前隔几轮跑一次、改后再凭印象比较”可靠得多，特别适合高抖动的 IO / 并发相关基准。
+
+# 字符热点的进一步收紧
+
+如果 profile 已经明确显示热点落在某个“逐字符扫整串”的辅助函数里，可以继续用更便宜的定位原语缩小扫描范围，而不是重写整条主流程。
+
+这次在 `internal/gitops/paths.go` 里，`hasProtectedPathCandidate` 原本会逐字符判断整条路径是否存在段首 `.`。profile 说明它本身已经成了次级热点后，可以继续把它改成：
+
+1. 先用 `strings.IndexByte(..., '.')` 只跳到真正的 `.` 位置。
+2. 只在这些命中的位置上检查“是否位于段首”和“是否可能是 `.git` 前缀”。
+
+同 session 的候选/基线 10 次对照结果：
+
+- candidate: `average 151570.8 ns/op`, `median 159163 ns/op`
+- baseline: `average 161255.7 ns/op`, `median 173760 ns/op`
+
+要点不是“看到字符串就上 `IndexByte`”，而是先确认热点确实来自大量无效字符扫描，再把线性扫整串改成“只扫目标字符命中点”。
