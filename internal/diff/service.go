@@ -173,6 +173,10 @@ func (s *Service) resolveComparedEntryRange(
 	resultErr *error,
 	errOnce *sync.Once,
 ) {
+	if len(ignored) == 0 {
+		s.resolveComparedEntryRangeWithoutIgnored(request, resolved, worker, workerCount, resultErr, errOnce)
+		return
+	}
 	for index := worker; index < len(resolved); index += workerCount {
 		relPath, targetExists, ok := unresolvedCompareEntry(resolved[index])
 		if !ok {
@@ -184,6 +188,39 @@ func (s *Service) resolveComparedEntryRange(
 			continue
 		}
 		resolved[index] = entry
+	}
+}
+
+func (s *Service) resolveComparedEntryRangeWithoutIgnored(
+	request Request,
+	resolved []model.DiffEntry,
+	worker int,
+	workerCount int,
+	resultErr *error,
+	errOnce *sync.Once,
+) {
+	for index := worker; index < len(resolved); index += workerCount {
+		entry := resolved[index]
+		switch entry.SizeBytes {
+		case unresolvedAddedSize:
+			sizeBytes, err := s.fs.FileSizeFromRoot(request.SourceRoot, entry.Path)
+			if err != nil {
+				errOnce.Do(func() { *resultErr = err })
+				continue
+			}
+			resolved[index] = entryWithSize(entry.Path, model.DiffKindAdded, sizeBytes)
+		case unresolvedCompareSize:
+			comparison, err := s.fs.CompareFileFromRoots(request.SourceRoot, request.TargetRoot, entry.Path)
+			if err != nil {
+				errOnce.Do(func() { *resultErr = err })
+				continue
+			}
+			if comparison.Equal {
+				resolved[index] = model.DiffEntry{}
+				continue
+			}
+			resolved[index] = entryWithSize(entry.Path, model.DiffKindModified, comparison.LeftSize)
+		}
 	}
 }
 
