@@ -10,6 +10,7 @@ tags:
   - pprof
   - gitops
   - app
+  - syncer
   - optimization
 ---
 
@@ -358,3 +359,29 @@ profile 直觉上像是在用更便宜的原语替代热点判断，但 `Benchma
 这里省下来的只是少量目录线性扫描，但换来的却是更早分配 map、更早填充 map，以及更多 GC 压力。结果是 CPU 和内存一起变差。
 
 要点是：阈值类优化不能只盯“切换后单次查重更快”，还要看“切换本身引入了多少额外对象”。如果 map 的启用频率大幅上升，而输入规模又没大到足以摊平这笔成本，就应直接回退。
+
+# 边界统一规范化后，热点内部可以收紧契约
+
+如果路径规范化已经在生产端统一完成，就不要在热点消费端重复为“不该出现的数据形态”付费。
+
+这次在 `internal/syncer/service.go` 的 `relativeDirectoryKey` 上，先补了链路核实：
+
+1. `internal/platform/filesystem.go` 的 `ListRegularFiles` 通过 `filepath.ToSlash(rel)` 输出 slash 路径。
+2. `internal/diff/service.go` 里的 `entryWithSize` / `deletedEntry` 只是把 `relPath` 直接写进 `model.DiffEntry.Path`。
+3. `internal/syncer/service_test.go` 的删除 benchmark 也用 `filepath.ToSlash(filepath.Join(...))` 构造 `DiffEntry.Path`。
+
+在这个契约下，`applyDeletes` 热点里的 `relativeDirectoryKey` 就不需要再为 `\\` 做逐字节兼容判断，可以直接只找 `'/'`。
+
+同 session、同命令、`-benchtime=200ms -count 8` 的成对对照结果：
+
+- `BenchmarkApplyDeletesManyFilesSameDirs`
+- candidate: `average 30002.8 ns/op`, `median 30342.5 ns/op`
+- baseline: `average 32867.8 ns/op`, `median 33100 ns/op`
+
+`BenchmarkApplyCopiesManyFiles` 没有经过这条路径，因此只作为回归哨兵，不参与这次去留判断。
+
+要点是：
+
+1. 先证明“异常输入形态在这条链路里不会出现”，再收紧热点契约。
+2. 兼容逻辑应当留在边界层，而不是在高频内部循环里每次重复判断。
+3. 如果未来新增了会写入反斜杠路径的生产端，应当修生产端或补测试，而不是把热点重新放宽成双分隔符兜底。

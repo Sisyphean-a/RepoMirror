@@ -180,7 +180,7 @@ func appendNativeRelativePath(buffer []byte, relPath string) []byte {
 
 func relativeDirectoryKey(relPath string) string {
 	for index := len(relPath) - 1; index >= 0; index-- {
-		if isPathSeparator(relPath[index]) {
+		if relPath[index] == '/' {
 			return relPath[:index]
 		}
 	}
