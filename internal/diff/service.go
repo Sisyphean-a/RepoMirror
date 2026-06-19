@@ -106,7 +106,7 @@ func (s *Service) resolveEntries(
 }
 
 func mergedPathCount(sourceFiles []string, targetFiles []string) int {
-	count := 0
+	count := len(sourceFiles)
 	sourceIndex := 0
 	targetIndex := 0
 	for sourceIndex < len(sourceFiles) && targetIndex < len(targetFiles) {
@@ -115,13 +115,13 @@ func mergedPathCount(sourceFiles []string, targetFiles []string) int {
 			sourceIndex++
 		case sourceFiles[sourceIndex] > targetFiles[targetIndex]:
 			targetIndex++
+			count++
 		default:
 			sourceIndex++
 			targetIndex++
 		}
-		count++
 	}
-	return count + len(sourceFiles) - sourceIndex + len(targetFiles) - targetIndex
+	return count + len(targetFiles) - targetIndex
 }
 
 func (s *Service) mergeEntries(

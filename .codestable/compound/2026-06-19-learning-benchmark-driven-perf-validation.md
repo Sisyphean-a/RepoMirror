@@ -156,3 +156,34 @@ tags:
 3. `B/op`、`allocs/op` 虽未变化，但 CPU 路径收益在同会话对照里可重复。
 
 结论是：同一种微优化，放在通用路径上可能只是噪声，放在契约更强的专用入口上才可能形成净收益。
+
+# 计数基准要贴近数据分布改写
+
+如果一个 helper 的职责只是为后续切片预分配算容量，而输入分布本身明显偏向一侧，可以把“逐步累加 union 大小”的写法改成“从更大的稳定基数出发，只在少数分支补增量”。
+
+这次在 `internal/diff/service.go` 里，`mergedPathCount` 的输入来自：
+
+1. `sourceFiles`：完整的 source 可同步文件集。
+2. `targetFiles`：通常是 source 的子集或近似子集。
+
+原实现每轮比较都会 `count++`，最后再补 `len(sourceFiles)-sourceIndex` 和 `len(targetFiles)-targetIndex`。在 benchmark 数据里，`targetFiles` 是“每 4 个缺 1 个”的形状，这意味着：
+
+- 绝大多数轮次只是确认 source 已存在的路径；
+- 真正需要额外增加 union 大小的，只是 `target` 独有路径分支。
+
+因此可以改成：
+
+1. 先用 `len(sourceFiles)` 作为基数。
+2. 只有命中 `sourcePath > targetPath` 时才 `count++`。
+3. 循环结束后只补剩余的 `target` 尾段。
+
+同 session 5 次候选/基线对照结果：
+
+- `BenchmarkMergedPathCount`
+- candidate: `average 16038.4 ns/op`, `median 16177 ns/op`
+- baseline: `average 16346.8 ns/op`, `median 16446 ns/op`
+- `BenchmarkCalculateLargeDiff`
+- candidate: `average 166800.2 ns/op`, `median 184135 ns/op`
+- baseline: `average 169364.4 ns/op`, `median 188567 ns/op`
+
+这个优化能保留的关键，不是“少一次加法”这么简单，而是它顺着真实数据分布改写了计数逻辑：把最常见路径变成默认成本，把少见分支留给增量处理。
