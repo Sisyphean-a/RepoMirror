@@ -328,3 +328,33 @@ profile 直觉上像是在用更便宜的原语替代热点判断，但 `Benchma
 如果此时直接按 `root == ""` 早返，就会把本应展示给用户的仓库错误态吞掉，退化成“像没配置一样”的空状态。
 
 要点是：在状态装配路径里，`root == ""` 不是纯性能信号，而是带业务语义的状态位。只看它是否为空就做短路，等于把“未配置”和“配置了但探测失败”这两类场景错误合并。遇到这种情况，应优先回到语义边界，而不是继续做 benchmark。
+
+# 更早切到 seen map 可能会被分配成本反噬
+
+在去重热点里，线性扫描显眼不代表应当尽早切到 map。特别是当每个 worker 的候选量不大、而且 map 一旦启用就会引入额外分配时，更早切换阈值可能整体更慢。
+
+这次在 `internal/syncer/service.go` 的 `applyDeletes` 里试过把：
+
+1. 原本 `len(group.entries) == cleanupLinearScanLimit+1` 才创建 `group.seen`
+
+改成：
+
+1. `len(group.entries) == cleanupInlineEntryLimit+1` 就提前创建 `group.seen`
+
+直觉上这能更早避开 `hasCleanupDirectory` 的线性扫描，但同 session 对照结果明确回退：
+
+- `BenchmarkApplyDeletesManyFilesSameDirs`
+- candidate: `average 57178.8 ns/op`, `median 69489 ns/op`
+- baseline: `average 52194.8 ns/op`, `median 63143 ns/op`
+- `BenchmarkApplyCopiesManyFiles`
+- candidate: `average 20034.4 ns/op`, `median 20292 ns/op`
+- baseline: `average 19878.4 ns/op`, `median 19881 ns/op`
+
+而且分配明显恶化：
+
+- candidate: `4352 B/op`, `37 allocs/op`
+- baseline: `2304 B/op`, `21 allocs/op`
+
+这里省下来的只是少量目录线性扫描，但换来的却是更早分配 map、更早填充 map，以及更多 GC 压力。结果是 CPU 和内存一起变差。
+
+要点是：阈值类优化不能只盯“切换后单次查重更快”，还要看“切换本身引入了多少额外对象”。如果 map 的启用频率大幅上升，而输入规模又没大到足以摊平这笔成本，就应直接回退。
