@@ -304,3 +304,27 @@ profile 直觉上像是在用更便宜的原语替代热点判断，但 `Benchma
 这里不能只看三条 benchmark 略好就保留，因为 `BenchmarkLoadStateStatusFailureShortCircuit` 是 `LoadState` 的关键失败分支之一，而且它稳定变差。说明这种“布尔化条件”更多是在改变分支形态，而不是减少实质成本。
 
 要点是：当原逻辑里的计数范围很小、最多只有 `0/1/2` 三种状态时，改成多个布尔条件并不会天然更轻。只要关键路径 benchmark 没有一起改善，就应直接回退。
+
+# 按 root 早返会吞掉仓库探测错误
+
+在 `internal/app/state.go` 里，不能把“两个仓库都没有可用 root”简单等价成“无需继续 enrich，可以直接返回空状态”。
+
+这次试过在 `buildState` 里把：
+
+1. 先 `resolveRepositories`
+2. 立即根据 `repositoryA.root == "" && repositoryB.root == ""` 早返
+
+放到 `enrichState` 之前，想减少未配置场景的一次空转调用。但这个候选直接破坏了错误语义：
+
+- `TestServiceAutoPersistsConfigChanges`
+- `TestServiceSyncCommitAndPushFlow`
+- `TestBuildStateIgnoresDiffFailureWhenStatusFails`
+
+都会失败，因为“root 为空”并不只代表“未配置”，也可能代表：
+
+1. 仓库路径已配置，但 `ResolveRepositoryRoot` 失败。
+2. `setProbeError` 已经把 `summary` 和 `status` 写成错误态，后续还需要继续沿用这些错误信息构造 UI state。
+
+如果此时直接按 `root == ""` 早返，就会把本应展示给用户的仓库错误态吞掉，退化成“像没配置一样”的空状态。
+
+要点是：在状态装配路径里，`root == ""` 不是纯性能信号，而是带业务语义的状态位。只看它是否为空就做短路，等于把“未配置”和“配置了但探测失败”这两类场景错误合并。遇到这种情况，应优先回到语义边界，而不是继续做 benchmark。
