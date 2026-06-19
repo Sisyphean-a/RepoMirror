@@ -95,7 +95,7 @@ func (s *Service) IgnoredPathSetFromRoot(root string, pathGroups ...[]string) (m
 
 func (s *Service) IgnoredPathSetFromRootSorted(root string, paths []string) (map[string]struct{}, error) {
 	input := borrowInputBuffer()
-	input = buildSingleGroupInputWithoutDedup(input, paths, estimateSingleGroupBytes(paths))
+	input = buildSortedSingleGroupInput(input, paths)
 	defer releaseInputBuffer(input)
 	return s.ignoredPathSetFromInput(root, input)
 }
@@ -217,6 +217,22 @@ func buildSingleGroupInput(buffer []byte, paths []string) []byte {
 		return buildSingleGroupInputWithoutDedup(buffer, paths, totalBytes)
 	}
 	return buildSingleGroupInputDedup(buffer, paths, totalBytes)
+}
+
+func buildSortedSingleGroupInput(buffer []byte, paths []string) []byte {
+	totalBytes := estimateSingleGroupBytes(paths)
+	if totalBytes == 0 {
+		return buffer[:0]
+	}
+	buffer = growBuffer(buffer, totalBytes)
+	buffer = buffer[:totalBytes]
+	writeIndex := 0
+	for _, path := range paths {
+		writeIndex += copy(buffer[writeIndex:], path)
+		buffer[writeIndex] = '\n'
+		writeIndex++
+	}
+	return buffer
 }
 
 func buildSingleGroupInputWithoutDedup(buffer []byte, paths []string, totalBytes int) []byte {

@@ -123,3 +123,36 @@ tags:
 3. 是否真的换来了更少分配或更明确的热点消除。
 
 如果三条里有一条站不住，就把这种“预分配 + 手写 copy”视为未证实优化，直接回退。
+
+# 契约明确的专用快路径可以单独成立
+
+同样是“预分配 + 手写 `copy`”，只有在输入契约比通用路径更强、能明确删掉一层通用分支时，才值得单独保留。
+
+这次在 `internal/gitops/service.go` 里，`IgnoredPathSetFromRootSorted` 的调用方是 `internal/diff/service.go`，传入的是 `ListSyncableSourcePathsFromRoot` 产出的 `sourceFiles`。这条路径的前提比普通 `buildSingleGroupInputWithoutDedup` 更强：
+
+1. 输入已排序。
+2. 输入已去重。
+3. 输入里没有空串。
+
+在这个前提下，可以把它从通用构造函数里拆出来，走专用 `buildSortedSingleGroupInput`：
+
+1. 先按 `estimateSingleGroupBytes` 一次性定长。
+2. 直接按偏移量 `copy` 路径，再补 `'\n'`。
+3. 不再重复做“空串跳过”的通用分支判断。
+
+同 session 10 次候选/基线对照结果：
+
+- `BenchmarkIgnoredPathSetFromRootSorted`
+- candidate: `average 49909.7 ns/op`, `median 51006.5 ns/op`
+- baseline: `average 50258.7 ns/op`, `median 53399.5 ns/op`
+- `BenchmarkCalculateLargeDiff`
+- candidate: `average 175570.7 ns/op`, `median 182965.5 ns/op`
+- baseline: `average 179745.0 ns/op`, `median 184280.0 ns/op`
+
+这里能保留，不是因为“手写 `copy` 天生更快”，而是因为：
+
+1. 优化绑定在一个更强的输入契约上，没有污染通用路径。
+2. 目标 benchmark 和真实消费者 benchmark 同时成立。
+3. `B/op`、`allocs/op` 虽未变化，但 CPU 路径收益在同会话对照里可重复。
+
+结论是：同一种微优化，放在通用路径上可能只是噪声，放在契约更强的专用入口上才可能形成净收益。
