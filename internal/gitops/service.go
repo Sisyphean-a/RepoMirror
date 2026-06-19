@@ -137,6 +137,11 @@ func buildLineSeparatedInput(buffer []byte, pathGroups ...[]string) []byte {
 	if len(pathGroups) == 1 {
 		return buildSingleGroupInput(buffer, pathGroups[0])
 	}
+	if len(pathGroups) == 2 {
+		if merged, ok := buildTwoOrderedGroupsInput(buffer, pathGroups[0], pathGroups[1]); ok {
+			return merged
+		}
+	}
 	totalPaths, totalBytes := estimateInputSize(pathGroups)
 	buffer = growBuffer(buffer, totalBytes)
 	seen := make(map[string]struct{}, totalPaths)
@@ -154,6 +159,53 @@ func buildLineSeparatedInput(buffer []byte, pathGroups ...[]string) []byte {
 		}
 	}
 	return buffer
+}
+
+func buildTwoOrderedGroupsInput(buffer []byte, left []string, right []string) ([]byte, bool) {
+	leftBytes, leftOrdered := analyzeSingleGroupPaths(left)
+	if !leftOrdered {
+		return nil, false
+	}
+	rightBytes, rightOrdered := analyzeSingleGroupPaths(right)
+	if !rightOrdered {
+		return nil, false
+	}
+	buffer = growBuffer(buffer, leftBytes+rightBytes)
+	leftIndex := 0
+	rightIndex := 0
+	lastPath := ""
+	for leftIndex < len(left) && rightIndex < len(right) {
+		leftPath := left[leftIndex]
+		rightPath := right[rightIndex]
+		switch {
+		case leftPath < rightPath:
+			buffer, lastPath = appendUniqueLine(buffer, leftPath, lastPath)
+			leftIndex++
+		case leftPath > rightPath:
+			buffer, lastPath = appendUniqueLine(buffer, rightPath, lastPath)
+			rightIndex++
+		default:
+			buffer, lastPath = appendUniqueLine(buffer, leftPath, lastPath)
+			leftIndex++
+			rightIndex++
+		}
+	}
+	for ; leftIndex < len(left); leftIndex++ {
+		buffer, lastPath = appendUniqueLine(buffer, left[leftIndex], lastPath)
+	}
+	for ; rightIndex < len(right); rightIndex++ {
+		buffer, lastPath = appendUniqueLine(buffer, right[rightIndex], lastPath)
+	}
+	return buffer, true
+}
+
+func appendUniqueLine(buffer []byte, path string, lastPath string) ([]byte, string) {
+	if path == "" || path == lastPath {
+		return buffer, lastPath
+	}
+	buffer = append(buffer, path...)
+	buffer = append(buffer, '\n')
+	return buffer, path
 }
 
 func buildSingleGroupInput(buffer []byte, paths []string) []byte {
