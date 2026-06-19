@@ -58,6 +58,12 @@ func estimatedNullSeparatedCount(output []byte) int {
 }
 
 func isProtectedPath(relPath string) bool {
+	if len(relPath) < 4 {
+		return false
+	}
+	if !hasProtectedPathCandidate(relPath) {
+		return false
+	}
 	segmentStart := 0
 	for segmentStart <= len(relPath) {
 		separatorOffset := stringsIndexPathSeparator(relPath, segmentStart)
@@ -76,6 +82,19 @@ func isProtectedPath(relPath string) bool {
 			break
 		}
 		segmentStart = index + 1
+	}
+	return false
+}
+
+func hasProtectedPathCandidate(relPath string) bool {
+	if relPath[0] == '.' {
+		return true
+	}
+	for index := 1; index < len(relPath)-3; index++ {
+		if !isPathSeparator(relPath[index-1]) || relPath[index] != '.' {
+			continue
+		}
+		return true
 	}
 	return false
 }
