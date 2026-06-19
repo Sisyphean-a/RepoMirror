@@ -44,7 +44,7 @@ func (s *Store) Save(cfg model.AppConfig) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return err
 	}
-	payload, err := json.MarshalIndent(cfg.WithDefaults(), "", "  ")
+	payload, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}

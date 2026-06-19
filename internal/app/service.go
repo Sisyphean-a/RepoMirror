@@ -8,28 +8,43 @@ import (
 
 	"RepoMirror/internal/config"
 	"RepoMirror/internal/diff"
-	"RepoMirror/internal/gitops"
 	"RepoMirror/internal/model"
 	"RepoMirror/internal/syncer"
 )
+
+type RepositoryInspector interface {
+	ResolveRepositoryRoot(path string) (string, error)
+	ReadTargetStatus(repoPath string) (model.TargetRepositoryStatus, error)
+	ReadTargetStatusFromRoot(root string) (model.TargetRepositoryStatus, error)
+	Commit(repoPath string, message string) error
+	Push(repoPath string) error
+}
+
+type DifferenceCalculator interface {
+	Calculate(request diff.Request) (diff.Result, error)
+}
+
+type RepositorySynchronizer interface {
+	Sync(request syncer.Request) error
+}
 
 type Service struct {
 	mu           sync.Mutex
 	ctx          context.Context
 	store        *config.Store
 	selector     DirectorySelector
-	inspector    *gitops.Service
-	differ       *diff.Service
-	synchronizer *syncer.Service
+	inspector    RepositoryInspector
+	differ       DifferenceCalculator
+	synchronizer RepositorySynchronizer
 	config       model.AppConfig
 }
 
 func NewService(
 	store *config.Store,
 	selector DirectorySelector,
-	inspector *gitops.Service,
-	differ *diff.Service,
-	synchronizer *syncer.Service,
+	inspector RepositoryInspector,
+	differ DifferenceCalculator,
+	synchronizer RepositorySynchronizer,
 	initialConfig model.AppConfig,
 ) *Service {
 	return &Service{
@@ -77,7 +92,7 @@ func (s *Service) SaveConfig() (model.DashboardState, error) {
 func (s *Service) currentConfig() model.AppConfig {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.config.WithDefaults()
+	return s.config
 }
 
 func (s *Service) updateConfig(mutator func(*model.AppConfig)) (model.AppConfig, error) {
@@ -95,5 +110,5 @@ func (s *Service) updateConfig(mutator func(*model.AppConfig)) (model.AppConfig,
 }
 
 func (s *Service) saveConfig(cfg model.AppConfig) error {
-	return s.store.Save(cfg.WithDefaults())
+	return s.store.Save(cfg)
 }
