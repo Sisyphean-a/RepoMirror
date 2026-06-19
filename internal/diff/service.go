@@ -1,7 +1,6 @@
 package diff
 
 import (
-	"path/filepath"
 	"runtime"
 	"sync"
 
@@ -11,7 +10,7 @@ import (
 
 type GitInspector interface {
 	ListSyncableSourcePathsFromRoot(root string) ([]string, error)
-	IgnoredPathsFromRoot(root string, pathGroups ...[]string) (map[string]string, error)
+	IgnoredPathSetFromRootSorted(root string, paths []string) (map[string]struct{}, error)
 }
 
 type Service struct {
@@ -29,11 +28,10 @@ type Result struct {
 	Summary model.DiffSummary
 }
 
-type compareJob struct {
-	index        int
-	relPath      string
-	targetExists bool
-}
+const (
+	unresolvedAddedSize   int64 = -1
+	unresolvedCompareSize int64 = -2
+)
 
 func NewService(fsys platform.FileSystem, gitInspector GitInspector) *Service {
 	return &Service{fs: fsys, git: gitInspector}
@@ -44,7 +42,7 @@ func (s *Service) Calculate(request Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	ignored, err := s.git.IgnoredPathsFromRoot(request.TargetRoot, sourceFiles, targetFiles)
+	ignored, err := s.git.IgnoredPathSetFromRootSorted(request.TargetRoot, sourceFiles)
 	if err != nil {
 		return Result{}, err
 	}
@@ -62,15 +60,12 @@ func (s *Service) loadFiles(request Request) ([]string, []string, error) {
 	var sourceErr error
 	var targetErr error
 
-	waitGroup.Add(2)
+	waitGroup.Add(1)
 	go func() {
-		defer waitGroup.Done()
 		sourceFiles, sourceErr = s.git.ListSyncableSourcePathsFromRoot(request.SourceRoot)
+		waitGroup.Done()
 	}()
-	go func() {
-		defer waitGroup.Done()
-		targetFiles, targetErr = s.fs.ListRegularFiles(request.TargetRoot)
-	}()
+	targetFiles, targetErr = s.git.ListSyncableSourcePathsFromRoot(request.TargetRoot)
 	waitGroup.Wait()
 
 	if sourceErr != nil {
@@ -86,22 +81,23 @@ func (s *Service) collectEntries(
 	request Request,
 	sourceFiles []string,
 	targetFiles []string,
-	ignored map[string]string,
+	ignored map[string]struct{},
 ) ([]model.DiffEntry, model.DiffSummary, error) {
 	resolved, err := s.resolveEntries(request, sourceFiles, targetFiles, ignored)
 	if err != nil {
 		return nil, model.DiffSummary{}, err
 	}
-	return compactEntriesAndSummary(resolved)
+	entries, summary := compactEntriesAndSummary(resolved)
+	return entries, summary, nil
 }
 
 func (s *Service) resolveEntries(
 	request Request,
 	sourceFiles []string,
 	targetFiles []string,
-	ignored map[string]string,
-) ([]*model.DiffEntry, error) {
-	resolved := make([]*model.DiffEntry, len(sourceFiles)+len(targetFiles))
+	ignored map[string]struct{},
+) ([]model.DiffEntry, error) {
+	resolved := make([]model.DiffEntry, mergedPathCount(sourceFiles, targetFiles))
 	resolvedCount, err := s.mergeEntries(request, sourceFiles, targetFiles, ignored, resolved)
 	if err != nil {
 		return nil, err
@@ -109,60 +105,93 @@ func (s *Service) resolveEntries(
 	return resolved[:resolvedCount], nil
 }
 
+func mergedPathCount(sourceFiles []string, targetFiles []string) int {
+	count := 0
+	sourceIndex := 0
+	targetIndex := 0
+	for sourceIndex < len(sourceFiles) && targetIndex < len(targetFiles) {
+		switch {
+		case sourceFiles[sourceIndex] < targetFiles[targetIndex]:
+			sourceIndex++
+		case sourceFiles[sourceIndex] > targetFiles[targetIndex]:
+			targetIndex++
+		default:
+			sourceIndex++
+			targetIndex++
+		}
+		count++
+	}
+	return count + len(sourceFiles) - sourceIndex + len(targetFiles) - targetIndex
+}
+
 func (s *Service) mergeEntries(
 	request Request,
 	sourceFiles []string,
 	targetFiles []string,
-	ignored map[string]string,
-	resolved []*model.DiffEntry,
+	ignored map[string]struct{},
+	resolved []model.DiffEntry,
 ) (int, error) {
-	jobs, waitWorkers := s.startCompareWorkers(request, ignored, resolved, len(sourceFiles))
-	resolvedCount := enqueueMergedEntries(sourceFiles, targetFiles, ignored, resolved, jobs)
-	close(jobs)
-	return resolvedCount, waitWorkers()
+	resolvedCount := enqueueMergedEntries(sourceFiles, targetFiles, ignored, resolved)
+	if err := s.resolveComparedEntries(request, ignored, resolved[:resolvedCount], len(sourceFiles)); err != nil {
+		return 0, err
+	}
+	return resolvedCount, nil
 }
 
-func (s *Service) startCompareWorkers(
+func (s *Service) resolveComparedEntries(
 	request Request,
-	ignored map[string]string,
-	resolved []*model.DiffEntry,
+	ignored map[string]struct{},
+	resolved []model.DiffEntry,
 	sourceCount int,
-) (chan compareJob, func() error) {
+) error {
 	workerCount := min(sourceCount, diffWorkerCount())
-	jobs := make(chan compareJob, max(1, workerCount))
 	if workerCount == 0 {
-		return jobs, func() error { return nil }
+		return nil
 	}
 	var waitGroup sync.WaitGroup
 	var resultErr error
 	var errOnce sync.Once
 
-	waitGroup.Add(workerCount)
-	for worker := 0; worker < workerCount; worker++ {
-		go func() {
-			defer waitGroup.Done()
-			for job := range jobs {
-				entry, err := s.diffFromSourceFile(request, job.relPath, job.targetExists, ignored)
-				if err != nil {
-					errOnce.Do(func() { resultErr = err })
-					continue
-				}
-				resolved[job.index] = entry
-			}
-		}()
+	waitGroup.Add(max(0, workerCount-1))
+	for worker := 0; worker < workerCount-1; worker++ {
+		go func(worker int) {
+			s.resolveComparedEntryRange(request, ignored, resolved, worker, workerCount, &resultErr, &errOnce)
+			waitGroup.Done()
+		}(worker)
 	}
-	return jobs, func() error {
-		waitGroup.Wait()
-		return resultErr
+	s.resolveComparedEntryRange(request, ignored, resolved, workerCount-1, workerCount, &resultErr, &errOnce)
+	waitGroup.Wait()
+	return resultErr
+}
+
+func (s *Service) resolveComparedEntryRange(
+	request Request,
+	ignored map[string]struct{},
+	resolved []model.DiffEntry,
+	worker int,
+	workerCount int,
+	resultErr *error,
+	errOnce *sync.Once,
+) {
+	for index := worker; index < len(resolved); index += workerCount {
+		relPath, targetExists, ok := unresolvedCompareEntry(resolved[index])
+		if !ok {
+			continue
+		}
+		entry, err := s.diffFromSourceFile(request, relPath, targetExists, ignored)
+		if err != nil {
+			errOnce.Do(func() { *resultErr = err })
+			continue
+		}
+		resolved[index] = entry
 	}
 }
 
 func enqueueMergedEntries(
 	sourceFiles []string,
 	targetFiles []string,
-	ignored map[string]string,
-	resolved []*model.DiffEntry,
-	jobs chan<- compareJob,
+	ignored map[string]struct{},
+	resolved []model.DiffEntry,
 ) int {
 	resolvedCount := 0
 	sourceIndex := 0
@@ -172,33 +201,32 @@ func enqueueMergedEntries(
 		targetPath := targetFiles[targetIndex]
 		switch {
 		case sourcePath < targetPath:
-			queueCompareJob(jobs, resolvedCount, sourcePath, false)
+			resolved[resolvedCount] = unresolvedAddedEntry(sourcePath)
 			sourceIndex++
 		case sourcePath > targetPath:
 			resolved[resolvedCount] = deletedEntry(targetPath, ignored)
 			targetIndex++
 		default:
-			queueCompareJob(jobs, resolvedCount, sourcePath, true)
+			resolved[resolvedCount] = unresolvedModifiedEntry(sourcePath)
 			sourceIndex++
 			targetIndex++
 		}
 		resolvedCount++
 	}
-	return enqueueRemainingEntries(sourceFiles, targetFiles, ignored, resolved, jobs, sourceIndex, targetIndex, resolvedCount)
+	return enqueueRemainingEntries(sourceFiles, targetFiles, ignored, resolved, sourceIndex, targetIndex, resolvedCount)
 }
 
 func enqueueRemainingEntries(
 	sourceFiles []string,
 	targetFiles []string,
-	ignored map[string]string,
-	resolved []*model.DiffEntry,
-	jobs chan<- compareJob,
+	ignored map[string]struct{},
+	resolved []model.DiffEntry,
 	sourceIndex int,
 	targetIndex int,
 	resolvedCount int,
 ) int {
 	for ; sourceIndex < len(sourceFiles); sourceIndex++ {
-		queueCompareJob(jobs, resolvedCount, sourceFiles[sourceIndex], false)
+		resolved[resolvedCount] = unresolvedAddedEntry(sourceFiles[sourceIndex])
 		resolvedCount++
 	}
 	for ; targetIndex < len(targetFiles); targetIndex++ {
@@ -208,24 +236,44 @@ func enqueueRemainingEntries(
 	return resolvedCount
 }
 
-func queueCompareJob(jobs chan<- compareJob, index int, relPath string, targetExists bool) {
-	jobs <- compareJob{index: index, relPath: relPath, targetExists: targetExists}
+func unresolvedAddedEntry(relPath string) model.DiffEntry {
+	return model.DiffEntry{Path: relPath, SizeBytes: unresolvedAddedSize}
 }
 
-func compactEntriesAndSummary(resolved []*model.DiffEntry) ([]model.DiffEntry, model.DiffSummary, error) {
-	entries := make([]model.DiffEntry, 0, len(resolved))
-	summary := model.DiffSummary{}
-	for _, entry := range resolved {
-		if entry != nil {
-			entries = append(entries, *entry)
-			appendSummary(&summary, entry.Kind)
-		}
+func unresolvedModifiedEntry(relPath string) model.DiffEntry {
+	return model.DiffEntry{Path: relPath, SizeBytes: unresolvedCompareSize}
+}
+
+func unresolvedCompareEntry(entry model.DiffEntry) (string, bool, bool) {
+	switch entry.SizeBytes {
+	case unresolvedAddedSize:
+		return entry.Path, false, true
+	case unresolvedCompareSize:
+		return entry.Path, true, true
+	default:
+		return "", false, false
 	}
-	return entries, summary, nil
+}
+
+func compactEntriesAndSummary(resolved []model.DiffEntry) ([]model.DiffEntry, model.DiffSummary) {
+	summary := model.DiffSummary{}
+	writeIndex := 0
+	for readIndex := range resolved {
+		entry := resolved[readIndex]
+		if entry.Kind == "" {
+			continue
+		}
+		appendSummary(&summary, entry.Kind)
+		if writeIndex != readIndex {
+			resolved[writeIndex] = entry
+		}
+		writeIndex++
+	}
+	return resolved[:writeIndex], summary
 }
 
 func diffWorkerCount() int {
-	return max(2, runtime.GOMAXPROCS(0))
+	return max(2, runtime.GOMAXPROCS(0)/2)
 }
 
 func appendSummary(summary *model.DiffSummary, kind model.DiffKind) {
@@ -237,8 +285,6 @@ func appendSummary(summary *model.DiffSummary, kind model.DiffKind) {
 		summary.Modified++
 	case model.DiffKindDeleted:
 		summary.Deleted++
-	case model.DiffKindProtected:
-		summary.Protected++
 	}
 }
 
@@ -246,53 +292,51 @@ func (s *Service) diffFromSourceFile(
 	request Request,
 	relPath string,
 	targetExists bool,
-	ignored map[string]string,
-) (*model.DiffEntry, error) {
-	if shouldSkipPath(relPath, ignored) {
-		return nil, nil
+	ignored map[string]struct{},
+) (model.DiffEntry, error) {
+	if len(ignored) != 0 {
+		if _, isIgnored := ignored[relPath]; isIgnored {
+			return model.DiffEntry{}, nil
+		}
 	}
-	sourcePath := fullPath(request.SourceRoot, relPath)
 	if !targetExists {
-		return s.sizedEntry(sourcePath, relPath, model.DiffKindAdded)
+		sizeBytes, err := s.fs.FileSizeFromRoot(request.SourceRoot, relPath)
+		if err != nil {
+			return model.DiffEntry{}, err
+		}
+		return entryWithSize(relPath, model.DiffKindAdded, sizeBytes), nil
 	}
-	targetPath := fullPath(request.TargetRoot, relPath)
-	comparison, err := s.fs.CompareFile(sourcePath, targetPath)
+	comparison, err := s.fs.CompareFileFromRoots(request.SourceRoot, request.TargetRoot, relPath)
 	if err != nil {
-		return nil, err
+		return model.DiffEntry{}, err
 	}
 	if comparison.Equal {
-		return nil, nil
+		return model.DiffEntry{}, nil
 	}
 	return entryWithSize(relPath, model.DiffKindModified, comparison.LeftSize), nil
 }
 
-func fullPath(root string, relPath string) string {
-	return filepath.Join(root, filepath.FromSlash(relPath))
-}
-
-func (s *Service) sizedEntry(path string, relPath string, kind model.DiffKind) (*model.DiffEntry, error) {
+func (s *Service) sizedEntry(path string, relPath string, kind model.DiffKind) (model.DiffEntry, error) {
 	sizeBytes, err := s.fs.FileSize(path)
 	if err != nil {
-		return nil, err
+		return model.DiffEntry{}, err
 	}
 	return entryWithSize(relPath, kind, sizeBytes), nil
 }
 
-func entryWithSize(relPath string, kind model.DiffKind, sizeBytes int64) *model.DiffEntry {
-	return &model.DiffEntry{Path: relPath, Kind: kind, SizeBytes: sizeBytes}
+func entryWithSize(relPath string, kind model.DiffKind, sizeBytes int64) model.DiffEntry {
+	return model.DiffEntry{
+		Path:      relPath,
+		Kind:      kind,
+		SizeBytes: sizeBytes,
+	}
 }
 
-func deletedEntry(relPath string, ignored map[string]string) *model.DiffEntry {
-	if shouldSkipPath(relPath, ignored) {
-		return nil
+func deletedEntry(relPath string, ignored map[string]struct{}) model.DiffEntry {
+	if len(ignored) != 0 {
+		if _, isIgnored := ignored[relPath]; isIgnored {
+			return model.DiffEntry{}
+		}
 	}
-	return &model.DiffEntry{Path: relPath, Kind: model.DiffKindDeleted}
-}
-
-func shouldSkipPath(relPath string, ignored map[string]string) bool {
-	if isProtected(relPath) {
-		return true
-	}
-	_, isIgnored := ignored[relPath]
-	return isIgnored
+	return entryWithSize(relPath, model.DiffKindDeleted, 0)
 }

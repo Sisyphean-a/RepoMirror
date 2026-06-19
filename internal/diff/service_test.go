@@ -3,6 +3,8 @@ package diff
 import (
 	"fmt"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,11 +51,10 @@ func TestCalculateRespectsIgnoreRules(t *testing.T) {
 		t.Fatalf("expected total summary to be 3, got %+v", result.Summary)
 	}
 	expectedSummary := model.DiffSummary{
-		Total:     3,
-		Added:     1,
-		Modified:  1,
-		Deleted:   1,
-		Protected: 0,
+		Total:    3,
+		Added:    1,
+		Modified: 1,
+		Deleted:  1,
 	}
 	if result.Summary != expectedSummary {
 		t.Fatalf("unexpected summary: got %+v want %+v", result.Summary, expectedSummary)
@@ -79,11 +80,16 @@ func assertDiffKind(t *testing.T, entries map[string]model.DiffKind, path string
 
 func TestCalculateKeepsOrderWhenComparisonsFinishOutOfOrder(t *testing.T) {
 	fileSystem := &concurrentCompareFileSystem{
-		targetFiles:   []string{"a.txt", "b.txt"},
 		firstStarted:  make(chan struct{}),
 		secondStarted: make(chan struct{}),
 	}
-	service := NewService(fileSystem, stubGitInspector{sourceFiles: []string{"a.txt", "b.txt"}})
+	inspector := &stubGitInspector{
+		filesByRoot: map[string][]string{
+			"source": {"a.txt", "b.txt"},
+			"target": {"a.txt", "b.txt"},
+		},
+	}
+	service := NewService(fileSystem, inspector)
 
 	result, err := service.Calculate(Request{SourceRoot: "source", TargetRoot: "target"})
 	if err != nil {
@@ -101,7 +107,13 @@ func TestCalculateKeepsOrderWhenComparisonsFinishOutOfOrder(t *testing.T) {
 }
 
 func TestCalculateHandlesDeletedOnlyTargets(t *testing.T) {
-	service := NewService(&concurrentCompareFileSystem{targetFiles: []string{"old.txt"}}, stubGitInspector{})
+	inspector := &stubGitInspector{
+		filesByRoot: map[string][]string{
+			"source": nil,
+			"target": {"old.txt"},
+		},
+	}
+	service := NewService(&concurrentCompareFileSystem{}, inspector)
 
 	result, err := service.Calculate(Request{SourceRoot: "source", TargetRoot: "target"})
 	if err != nil {
@@ -119,30 +131,65 @@ func TestCalculateHandlesDeletedOnlyTargets(t *testing.T) {
 	}
 }
 
+func TestCalculateChecksIgnoreRulesAgainstSourceFilesOnly(t *testing.T) {
+	inspector := &stubGitInspector{
+		filesByRoot: map[string][]string{
+			"source": {"added.txt"},
+			"target": {"old.txt"},
+		},
+	}
+	service := NewService(&concurrentCompareFileSystem{}, inspector)
+
+	_, err := service.Calculate(Request{SourceRoot: "source", TargetRoot: "target"})
+	if err != nil {
+		t.Fatalf("calculate failed: %v", err)
+	}
+
+	if len(inspector.ignoredCalls) != 1 {
+		t.Fatalf("expected 1 ignore check, got %d", len(inspector.ignoredCalls))
+	}
+	call := inspector.ignoredCalls[0]
+	if call.root != "target" {
+		t.Fatalf("unexpected ignore root: %s", call.root)
+	}
+	if !reflect.DeepEqual(call.paths, []string{"added.txt"}) {
+		t.Fatalf("unexpected ignore paths: got %v want %v", call.paths, []string{"added.txt"})
+	}
+}
+
+type ignoredCall struct {
+	root  string
+	paths []string
+}
+
 type stubGitInspector struct {
-	sourceFiles []string
-	ignored     map[string]string
+	filesByRoot  map[string][]string
+	ignored      map[string]struct{}
+	ignoredCalls []ignoredCall
 }
 
-func (stub stubGitInspector) ListSyncableSourcePathsFromRoot(string) ([]string, error) {
-	return stub.sourceFiles, nil
+func (stub stubGitInspector) ListSyncableSourcePathsFromRoot(root string) ([]string, error) {
+	return append([]string(nil), stub.filesByRoot[root]...), nil
 }
 
-func (stub stubGitInspector) IgnoredPathsFromRoot(string, ...[]string) (map[string]string, error) {
+func (stub *stubGitInspector) IgnoredPathSetFromRootSorted(root string, paths []string) (map[string]struct{}, error) {
+	stub.ignoredCalls = append(stub.ignoredCalls, ignoredCall{
+		root:  root,
+		paths: append([]string(nil), paths...),
+	})
 	if stub.ignored == nil {
-		return map[string]string{}, nil
+		return map[string]struct{}{}, nil
 	}
 	return stub.ignored, nil
 }
 
 type concurrentCompareFileSystem struct {
-	targetFiles   []string
 	firstStarted  chan struct{}
 	secondStarted chan struct{}
 }
 
 func (fs *concurrentCompareFileSystem) ListRegularFiles(string) ([]string, error) {
-	return fs.targetFiles, nil
+	panic("unexpected ListRegularFiles call")
 }
 
 func (fs *concurrentCompareFileSystem) Exists(string) (bool, error) {
@@ -167,12 +214,24 @@ func (fs *concurrentCompareFileSystem) CompareFile(left string, _ string) (platf
 	}
 }
 
+func (fs *concurrentCompareFileSystem) CompareFileFromRoots(leftRoot string, _ string, relPath string) (platform.FileComparison, error) {
+	return fs.CompareFile(relPath, "")
+}
+
 func (fs *concurrentCompareFileSystem) FilesEqual(string, string) (bool, error) {
 	panic("unexpected FilesEqual call")
 }
 
 func (fs *concurrentCompareFileSystem) FileSize(string) (int64, error) {
-	panic("unexpected FileSize call")
+	return 5, nil
+}
+
+func (fs *concurrentCompareFileSystem) FileSizeFromRoot(_ string, _ string) (int64, error) {
+	return 5, nil
+}
+
+func (fs *concurrentCompareFileSystem) CopyFileFromRoots(string, string, string) error {
+	panic("unexpected CopyFileFromRoots call")
 }
 
 func (fs *concurrentCompareFileSystem) CopyFile(string, string) error {
@@ -187,6 +246,150 @@ func (fs *concurrentCompareFileSystem) Remove(string) error {
 	panic("unexpected Remove call")
 }
 
+func (fs *concurrentCompareFileSystem) RemoveFromRoot(string, string) error {
+	panic("unexpected RemoveFromRoot call")
+}
+
 func (fs *concurrentCompareFileSystem) RemoveEmptyParents(string, string) error {
 	panic("unexpected RemoveEmptyParents call")
+}
+
+func (fs *concurrentCompareFileSystem) RemoveEmptyParentsFromRoot(string, string) error {
+	panic("unexpected RemoveEmptyParentsFromRoot call")
+}
+
+func BenchmarkCalculateLargeDiff(b *testing.B) {
+	const fileCount = 4000
+
+	sourceFiles := make([]string, 0, fileCount)
+	targetFiles := make([]string, 0, fileCount)
+	for index := 0; index < fileCount; index++ {
+		name := fmt.Sprintf("dir/file-%04d.txt", index)
+		sourceFiles = append(sourceFiles, name)
+		if index%4 != 0 {
+			targetFiles = append(targetFiles, name)
+		}
+	}
+
+	inspector := &stubGitInspector{
+		filesByRoot: map[string][]string{
+			"source": sourceFiles,
+			"target": targetFiles,
+		},
+	}
+	fileSystem := &benchmarkCompareFileSystem{}
+	service := NewService(fileSystem, inspector)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for iteration := 0; iteration < b.N; iteration++ {
+		result, err := service.Calculate(Request{SourceRoot: "source", TargetRoot: "target"})
+		if err != nil {
+			b.Fatalf("calculate failed: %v", err)
+		}
+		if len(result.Entries) == 0 {
+			b.Fatal("expected diff entries")
+		}
+	}
+}
+
+func BenchmarkMergedPathCount(b *testing.B) {
+	const fileCount = 4000
+	sourceFiles := make([]string, 0, fileCount)
+	targetFiles := make([]string, 0, fileCount)
+	for index := 0; index < fileCount; index++ {
+		name := fmt.Sprintf("dir/file-%04d.txt", index)
+		sourceFiles = append(sourceFiles, name)
+		if index%4 != 0 {
+			targetFiles = append(targetFiles, name)
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		count := mergedPathCount(sourceFiles, targetFiles)
+		if count == 0 {
+			b.Fatal("expected merged path count")
+		}
+	}
+}
+
+type benchmarkCompareFileSystem struct{}
+
+func (fs *benchmarkCompareFileSystem) ListRegularFiles(string) ([]string, error) {
+	panic("unexpected ListRegularFiles call")
+}
+
+func (fs *benchmarkCompareFileSystem) Exists(string) (bool, error) {
+	panic("unexpected Exists call")
+}
+
+func (fs *benchmarkCompareFileSystem) CompareFile(left string, _ string) (platform.FileComparison, error) {
+	size := int64(len(left))
+	return platform.FileComparison{
+		Equal:    strings.HasSuffix(left, "0.txt"),
+		LeftSize: size,
+	}, nil
+}
+
+func (fs *benchmarkCompareFileSystem) CompareFileFromRoots(leftRoot string, _ string, relPath string) (platform.FileComparison, error) {
+	size := int64(rootedPathLen(leftRoot, relPath))
+	return platform.FileComparison{
+		Equal:    strings.HasSuffix(relPath, "0.txt"),
+		LeftSize: size,
+	}, nil
+}
+
+func (fs *benchmarkCompareFileSystem) FilesEqual(string, string) (bool, error) {
+	panic("unexpected FilesEqual call")
+}
+
+func (fs *benchmarkCompareFileSystem) FileSize(path string) (int64, error) {
+	return int64(len(path)), nil
+}
+
+func (fs *benchmarkCompareFileSystem) FileSizeFromRoot(root string, relPath string) (int64, error) {
+	return int64(rootedPathLen(root, relPath)), nil
+}
+
+func (fs *benchmarkCompareFileSystem) CopyFileFromRoots(string, string, string) error {
+	panic("unexpected CopyFileFromRoots call")
+}
+
+func rootedPathLen(root string, relPath string) int {
+	if root == "" {
+		return len(relPath)
+	}
+	length := len(root) + len(relPath)
+	last := root[len(root)-1]
+	if last != '/' && last != '\\' {
+		length++
+	}
+	return length
+}
+
+func (fs *benchmarkCompareFileSystem) CopyFile(string, string) error {
+	panic("unexpected CopyFile call")
+}
+
+func (fs *benchmarkCompareFileSystem) EnsureDirectory(string) error {
+	panic("unexpected EnsureDirectory call")
+}
+
+func (fs *benchmarkCompareFileSystem) Remove(string) error {
+	panic("unexpected Remove call")
+}
+
+func (fs *benchmarkCompareFileSystem) RemoveFromRoot(string, string) error {
+	panic("unexpected RemoveFromRoot call")
+}
+
+func (fs *benchmarkCompareFileSystem) RemoveEmptyParents(string, string) error {
+	panic("unexpected RemoveEmptyParents call")
+}
+
+func (fs *benchmarkCompareFileSystem) RemoveEmptyParentsFromRoot(string, string) error {
+	panic("unexpected RemoveEmptyParentsFromRoot call")
 }

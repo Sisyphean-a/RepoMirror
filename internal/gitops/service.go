@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"RepoMirror/internal/model"
 )
@@ -18,10 +19,18 @@ type Runner interface {
 
 type Service struct {
 	runner Runner
+	mu     sync.RWMutex
+	roots  map[string]string
+}
+
+var inputBufferPool = sync.Pool{
+	New: func() any {
+		return make([]byte, 0, 64*1024)
+	},
 }
 
 func NewService(runner Runner) *Service {
-	return &Service{runner: runner}
+	return &Service{runner: runner, roots: make(map[string]string)}
 }
 
 func NewExecRunner() Runner {
@@ -29,14 +38,21 @@ func NewExecRunner() Runner {
 }
 
 func (s *Service) ResolveRepositoryRoot(path string) (string, error) {
-	if strings.TrimSpace(path) == "" {
+	trimmedPath := strings.TrimSpace(path)
+	if trimmedPath == "" {
 		return "", fmt.Errorf("repository path is empty")
 	}
-	output, err := s.runner.Run(path, nil, "rev-parse", "--show-toplevel")
+	cacheKey := filepath.Clean(trimmedPath)
+	if root, ok := s.cachedRoot(cacheKey); ok {
+		return root, nil
+	}
+	output, err := s.runner.Run(trimmedPath, nil, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", fmt.Errorf("failed to detect git repository: %w", err)
 	}
-	return strings.TrimSpace(string(output)), nil
+	root := filepath.Clean(strings.TrimSpace(string(output)))
+	s.rememberRoot(cacheKey, root)
+	return root, nil
 }
 
 func (s *Service) ListSyncableSourcePaths(repoPath string) ([]string, error) {
@@ -48,23 +64,18 @@ func (s *Service) ListSyncableSourcePaths(repoPath string) ([]string, error) {
 }
 
 func (s *Service) ListSyncableSourcePathsFromRoot(root string) ([]string, error) {
-	output, err := s.runner.Run(root, nil, "ls-files", "--cached", "--others", "--exclude-standard", "--deduplicate", "-z")
+	output, err := s.runner.Run(root, nil, "ls-files", "-t", "--cached", "--others", "--deleted", "--exclude-standard", "-z")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list source files: %w", err)
 	}
-	deletedPaths, err := s.deletedPathSetFromRoot(root)
-	if err != nil {
-		return nil, err
+	candidates, deleted, candidatesSorted, deletedSorted := collectSyncablePaths(output)
+	if !candidatesSorted {
+		sort.Strings(candidates)
 	}
-	paths := make([]string, 0)
-	for _, relPath := range splitNullSeparated(output) {
-		if isProtectedPath(relPath) || deletedPaths[relPath] {
-			continue
-		}
-		paths = append(paths, relPath)
+	if !deletedSorted {
+		sort.Strings(deleted)
 	}
-	sort.Strings(paths)
-	return paths, nil
+	return compactSortedPaths(candidates, deleted), nil
 }
 
 func (s *Service) IgnoredPaths(repoPath string, paths []string) (map[string]string, error) {
@@ -75,33 +86,60 @@ func (s *Service) IgnoredPaths(repoPath string, paths []string) (map[string]stri
 	return s.IgnoredPathsFromRoot(root, paths)
 }
 
-func (s *Service) IgnoredPathsFromRoot(root string, pathGroups ...[]string) (map[string]string, error) {
-	input := buildLineSeparatedInput(pathGroups...)
+func (s *Service) IgnoredPathSetFromRoot(root string, pathGroups ...[]string) (map[string]struct{}, error) {
+	input := borrowInputBuffer()
+	input = buildLineSeparatedInput(input, pathGroups...)
+	defer releaseInputBuffer(input)
+	return s.ignoredPathSetFromInput(root, input)
+}
+
+func (s *Service) IgnoredPathSetFromRootSorted(root string, paths []string) (map[string]struct{}, error) {
+	input := borrowInputBuffer()
+	input = buildSingleGroupInputWithoutDedup(input, paths, estimateSingleGroupBytes(paths))
+	defer releaseInputBuffer(input)
+	return s.ignoredPathSetFromInput(root, input)
+}
+
+func (s *Service) ignoredPathSetFromInput(root string, input []byte) (map[string]struct{}, error) {
 	if len(input) == 0 {
-		return map[string]string{}, nil
+		return nil, nil
+	}
+	output, err := s.runner.Run(root, input, "check-ignore", "--stdin", "--no-index")
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to evaluate target ignore rules: %w", err)
+	}
+	return parseIgnoredPathSet(output), nil
+}
+
+func (s *Service) IgnoredPathsFromRoot(root string, pathGroups ...[]string) (map[string]string, error) {
+	input := borrowInputBuffer()
+	input = buildLineSeparatedInput(input, pathGroups...)
+	defer releaseInputBuffer(input)
+	if len(input) == 0 {
+		return nil, nil
 	}
 	output, err := s.runner.Run(root, input, "check-ignore", "-v", "--stdin", "--no-index")
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-			return map[string]string{}, nil
+			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to evaluate target ignore rules: %w", err)
 	}
-	ignored := make(map[string]string)
-	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
-		relPath, rule := parseIgnoredPathRule(line)
-		if relPath == "" {
-			continue
-		}
-		ignored[relPath] = rule
-	}
-	return ignored, nil
+	return parseIgnoredPaths(output), nil
 }
 
-func buildLineSeparatedInput(pathGroups ...[]string) []byte {
-	buffer := bytes.NewBuffer(nil)
-	seen := make(map[string]struct{})
+func buildLineSeparatedInput(buffer []byte, pathGroups ...[]string) []byte {
+	if len(pathGroups) == 1 {
+		return buildSingleGroupInput(buffer, pathGroups[0])
+	}
+	totalPaths, totalBytes := estimateInputSize(pathGroups)
+	buffer = growBuffer(buffer, totalBytes)
+	seen := make(map[string]struct{}, totalPaths)
 	for _, paths := range pathGroups {
 		for _, path := range paths {
 			if path == "" {
@@ -111,85 +149,120 @@ func buildLineSeparatedInput(pathGroups ...[]string) []byte {
 				continue
 			}
 			seen[path] = struct{}{}
-			buffer.WriteString(path)
-			buffer.WriteByte('\n')
+			buffer = append(buffer, path...)
+			buffer = append(buffer, '\n')
 		}
 	}
-	return buffer.Bytes()
+	return buffer
 }
 
-func splitNullSeparated(raw []byte) []string {
-	if len(raw) == 0 {
-		return nil
+func buildSingleGroupInput(buffer []byte, paths []string) []byte {
+	if len(paths) == 0 {
+		return buffer[:0]
 	}
-	paths := make([]string, 0, 32)
-	for start := 0; start < len(raw); {
-		end := bytes.IndexByte(raw[start:], 0)
-		if end == -1 {
-			end = len(raw) - start
+	totalBytes, isAscending := analyzeSingleGroupPaths(paths)
+	if isAscending {
+		return buildSingleGroupInputWithoutDedup(buffer, paths, totalBytes)
+	}
+	return buildSingleGroupInputDedup(buffer, paths, totalBytes)
+}
+
+func buildSingleGroupInputWithoutDedup(buffer []byte, paths []string, totalBytes int) []byte {
+	buffer = growBuffer(buffer, totalBytes)
+	for _, path := range paths {
+		if path == "" {
+			continue
 		}
-		part := bytes.TrimSpace(raw[start : start+end])
-		if len(part) > 0 {
-			paths = append(paths, filepath.ToSlash(string(part)))
+		buffer = append(buffer, path...)
+		buffer = append(buffer, '\n')
+	}
+	return buffer
+}
+
+func buildSingleGroupInputDedup(buffer []byte, paths []string, totalBytes int) []byte {
+	buffer = growBuffer(buffer, totalBytes)
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		if path == "" {
+			continue
 		}
-		if start+end >= len(raw) {
-			break
+		if _, exists := seen[path]; exists {
+			continue
 		}
-		start += end + 1
+		seen[path] = struct{}{}
+		buffer = append(buffer, path...)
+		buffer = append(buffer, '\n')
 	}
-	return paths
+	return buffer
 }
 
-func parseIgnoredPathRule(line string) (string, string) {
-	parts := strings.SplitN(strings.TrimSpace(line), "\t", 2)
-	if len(parts) != 2 {
-		return "", ""
+func growBuffer(buffer []byte, targetCap int) []byte {
+	if cap(buffer) < targetCap {
+		return make([]byte, 0, targetCap)
 	}
-	meta := parts[0]
-	path := filepath.ToSlash(strings.TrimSpace(parts[1]))
-	patternStart := strings.LastIndex(meta, ":")
-	if patternStart == -1 || patternStart == len(meta)-1 {
-		return path, "ignore-protected"
-	}
-	return path, ignoredRuleLabel(meta[patternStart+1:])
+	return buffer[:0]
 }
 
-func ignoredRuleLabel(pattern string) string {
-	lower := strings.ToLower(strings.TrimSpace(pattern))
-	switch {
-	case strings.Contains(lower, ".env"):
-		return "env-protected"
-	case strings.Contains(lower, ".yaml"), strings.Contains(lower, ".yml"), strings.Contains(lower, "config"):
-		return "cfg-protected"
-	case strings.Contains(lower, "secret"), strings.Contains(lower, "key"):
-		return "secret-protected"
-	default:
-		return "ignore-protected"
+func analyzeSingleGroupPaths(paths []string) (int, bool) {
+	previous := ""
+	totalBytes := 0
+	for _, path := range paths {
+		totalBytes += len(path) + 1
+		if path == "" {
+			return totalBytes, false
+		}
+		if previous != "" && path <= previous {
+			return totalBytes, false
+		}
+		previous = path
 	}
+	return totalBytes, true
 }
 
-func isProtectedPath(relPath string) bool {
-	if strings.EqualFold(filepath.Base(relPath), ".gitignore") {
-		return true
-	}
-	for _, part := range strings.Split(filepath.ToSlash(relPath), "/") {
-		if strings.EqualFold(part, ".git") {
-			return true
+func estimateInputSize(pathGroups [][]string) (int, int) {
+	totalPaths := 0
+	totalBytes := 0
+	for _, paths := range pathGroups {
+		totalPaths += len(paths)
+		for _, path := range paths {
+			totalBytes += len(path) + 1
 		}
 	}
-	return false
+	return totalPaths, totalBytes
 }
 
-func (s *Service) deletedPathSetFromRoot(root string) (map[string]bool, error) {
-	output, err := s.runner.Run(root, nil, "ls-files", "--deleted", "-z")
-	if err != nil {
-		return nil, fmt.Errorf("failed to list deleted source files: %w", err)
+func estimateSingleGroupBytes(paths []string) int {
+	totalBytes := 0
+	for _, path := range paths {
+		totalBytes += len(path) + 1
 	}
-	paths := make(map[string]bool)
-	for _, relPath := range splitNullSeparated(output) {
-		paths[relPath] = true
+	return totalBytes
+}
+
+func borrowInputBuffer() []byte {
+	return inputBufferPool.Get().([]byte)
+}
+
+func releaseInputBuffer(buffer []byte) {
+	const maxRetainedInputCap = 512 * 1024
+	if cap(buffer) > maxRetainedInputCap {
+		return
 	}
-	return paths, nil
+	inputBufferPool.Put(buffer[:0])
+}
+
+func (s *Service) cachedRoot(path string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	root, ok := s.roots[path]
+	return root, ok
+}
+
+func (s *Service) rememberRoot(path string, root string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.roots[path] = root
+	s.roots[root] = root
 }
 
 type execRunner struct{}
@@ -207,47 +280,90 @@ func (execRunner) Run(repoPath string, input []byte, args ...string) ([]byte, er
 }
 
 func buildTargetStatus(repoPath string, statusOutput []byte) model.TargetRepositoryStatus {
+	cleanRepoPath := filepath.Clean(repoPath)
 	status := model.TargetRepositoryStatus{
-		Path:      repoPath,
-		Name:      model.RepositoryName(repoPath),
+		Path:      cleanRepoPath,
+		Name:      repositoryNameFromCleanPath(cleanRepoPath),
 		Branch:    "HEAD",
 		IsGitRepo: true,
 	}
-	for len(statusOutput) > 0 {
-		line, rest, found := bytes.Cut(statusOutput, []byte{'\n'})
-		statusOutput = rest
-		if !found {
-			statusOutput = nil
+	for start := 0; start < len(statusOutput); {
+		end := bytes.IndexByte(statusOutput[start:], '\n')
+		if end == -1 {
+			end = len(statusOutput) - start
 		}
-		trimmed := bytes.TrimSpace(line)
-		if len(trimmed) == 0 {
-			continue
+		line := trimTrailingCarriageReturn(statusOutput[start : start+end])
+		if len(line) != 0 {
+			if line[0] == '#' {
+				if branch, ok := parseBranchHead(line); ok {
+					status.Branch = branch
+				}
+			} else if isUntrackedStatusLine(line) {
+				status.UntrackedCount++
+			} else {
+				status.ModifiedCount++
+			}
 		}
-		if branch, ok := parseBranchHead(trimmed); ok {
-			status.Branch = branch
-			continue
+		if start+end >= len(statusOutput) {
+			break
 		}
-		if trimmed[0] == '#' {
-			continue
-		}
-		if bytes.HasPrefix(trimmed, []byte("? ")) {
-			status.UntrackedCount++
-			continue
-		}
-		status.ModifiedCount++
+		start += end + 1
 	}
 	status.IsClean = status.ModifiedCount == 0 && status.UntrackedCount == 0
 	return status
 }
 
 func parseBranchHead(line []byte) (string, bool) {
-	const prefix = "# branch.head "
-	if !bytes.HasPrefix(line, []byte(prefix)) {
+	if !bytes.HasPrefix(line, branchHeadPrefixBytes) {
 		return "", false
 	}
-	branch := strings.TrimSpace(string(bytes.TrimPrefix(line, []byte(prefix))))
+	branch := bytesToStringView(line[len(branchHeadPrefixBytes):])
 	if branch == "" || branch == "(detached)" {
 		return "HEAD", true
 	}
 	return branch, true
+}
+
+var branchHeadPrefixBytes = []byte("# branch.head ")
+
+func isUntrackedStatusLine(line []byte) bool {
+	return len(line) >= 2 && line[0] == '?' && line[1] == ' '
+}
+
+func repositoryNameFromCleanPath(cleanPath string) string {
+	if cleanPath == "" || cleanPath == "." || cleanPath == string(filepath.Separator) {
+		return cleanPath
+	}
+	return filepath.Base(cleanPath)
+}
+
+func parseTaggedPath(item string) (string, string) {
+	if len(item) < 3 || item[1] != ' ' {
+		return "", filepath.ToSlash(strings.TrimSpace(item))
+	}
+	return item[:1], filepath.ToSlash(strings.TrimSpace(item[2:]))
+}
+
+func compactSortedPaths(candidates []string, deleted []string) []string {
+	if len(candidates) == 0 {
+		return nil
+	}
+	writeIndex := 0
+	lastPath := ""
+	deletedIndex := 0
+	for _, relPath := range candidates {
+		if relPath == lastPath {
+			continue
+		}
+		lastPath = relPath
+		for deletedIndex < len(deleted) && deleted[deletedIndex] < relPath {
+			deletedIndex++
+		}
+		if deletedIndex < len(deleted) && deleted[deletedIndex] == relPath {
+			continue
+		}
+		candidates[writeIndex] = relPath
+		writeIndex++
+	}
+	return candidates[:writeIndex]
 }
