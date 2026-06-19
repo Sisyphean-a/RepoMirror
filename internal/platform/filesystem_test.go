@@ -71,6 +71,58 @@ func TestCopyFileCopiesLargeContent(t *testing.T) {
 	}
 }
 
+func TestFileSizeFromRootReturnsNestedFileSize(t *testing.T) {
+	root := t.TempDir()
+	content := strings.Repeat("abcdef0123456789", 128)
+	writeTempFile(t, root, filepath.Join("nested", "file.txt"), content)
+
+	size, err := NewOSFileSystem().FileSizeFromRoot(root, "nested/file.txt")
+	if err != nil {
+		t.Fatalf("file size from root failed: %v", err)
+	}
+	if size != int64(len(content)) {
+		t.Fatalf("unexpected file size: got %d want %d", size, len(content))
+	}
+}
+
+func TestCompareFileFromRootsMatchesRelativeFile(t *testing.T) {
+	leftRoot := t.TempDir()
+	rightRoot := t.TempDir()
+	content := strings.Repeat("abcdef0123456789", 256)
+	writeTempFile(t, leftRoot, filepath.Join("nested", "file.txt"), content)
+	writeTempFile(t, rightRoot, filepath.Join("nested", "file.txt"), content)
+
+	comparison, err := NewOSFileSystem().CompareFileFromRoots(leftRoot, rightRoot, "nested/file.txt")
+	if err != nil {
+		t.Fatalf("compare file from roots failed: %v", err)
+	}
+	if !comparison.Equal {
+		t.Fatalf("expected files to be equal")
+	}
+	if comparison.LeftSize != int64(len(content)) {
+		t.Fatalf("unexpected left size: got %d want %d", comparison.LeftSize, len(content))
+	}
+}
+
+func TestCopyFileFromRootsCopiesNestedFile(t *testing.T) {
+	sourceRoot := t.TempDir()
+	targetRoot := t.TempDir()
+	content := strings.Repeat("abcdef0123456789", 256)
+	writeTempFile(t, sourceRoot, filepath.Join("nested", "file.txt"), content)
+
+	if err := NewOSFileSystem().CopyFileFromRoots(sourceRoot, targetRoot, "nested/file.txt"); err != nil {
+		t.Fatalf("copy file from roots failed: %v", err)
+	}
+	assertPath := filepath.Join(targetRoot, "nested", "file.txt")
+	data, err := os.ReadFile(assertPath)
+	if err != nil {
+		t.Fatalf("read copied file failed: %v", err)
+	}
+	if string(data) != content {
+		t.Fatalf("unexpected copied content")
+	}
+}
+
 func TestListRegularFilesReturnsLexicalOrder(t *testing.T) {
 	root := t.TempDir()
 	writeTempFile(t, root, "z-last.txt", "z")
@@ -95,6 +147,63 @@ func TestListRegularFilesReturnsLexicalOrder(t *testing.T) {
 	}
 	if strings.Join(files, "\n") != strings.Join(expected, "\n") {
 		t.Fatalf("unexpected lexical order: got %v want %v", files, expected)
+	}
+}
+
+func TestRemoveEmptyParentsRemovesNestedEmptyDirs(t *testing.T) {
+	root := t.TempDir()
+	targetDir := filepath.Join(root, "a", "b", "c")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("mkdir nested dirs failed: %v", err)
+	}
+
+	start := filepath.Join(targetDir, "file.txt")
+	if err := NewOSFileSystem().RemoveEmptyParents(root, start); err != nil {
+		t.Fatalf("remove empty parents failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "a")); !os.IsNotExist(err) {
+		t.Fatalf("expected nested parent dirs to be removed, got err=%v", err)
+	}
+}
+
+func TestRemoveEmptyParentsStopsAtNonEmptyParent(t *testing.T) {
+	root := t.TempDir()
+	targetDir := filepath.Join(root, "a", "b", "c")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("mkdir nested dirs failed: %v", err)
+	}
+	writeTempFile(t, root, filepath.Join("a", "keep.txt"), "keep")
+
+	start := filepath.Join(targetDir, "file.txt")
+	if err := NewOSFileSystem().RemoveEmptyParents(root, start); err != nil {
+		t.Fatalf("remove empty parents failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "a")); err != nil {
+		t.Fatalf("expected non-empty parent to remain, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "a", "b")); !os.IsNotExist(err) {
+		t.Fatalf("expected empty nested parent to be removed, got err=%v", err)
+	}
+}
+
+func BenchmarkRemoveEmptyParents(b *testing.B) {
+	fsys := NewOSFileSystem()
+	b.ReportAllocs()
+	for iteration := 0; iteration < b.N; iteration++ {
+		root := b.TempDir()
+		targetDir := filepath.Join(root, "a", "b", "c", "d")
+		if err := os.MkdirAll(targetDir, 0o755); err != nil {
+			b.Fatalf("mkdir nested dirs failed: %v", err)
+		}
+		start := filepath.Join(targetDir, "file.txt")
+		b.StartTimer()
+		err := fsys.RemoveEmptyParents(root, start)
+		b.StopTimer()
+		if err != nil {
+			b.Fatalf("remove empty parents failed: %v", err)
+		}
 	}
 }
 

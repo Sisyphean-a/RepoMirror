@@ -2,14 +2,18 @@ package platform
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
+	"unsafe"
 )
 
 const fileCompareBufferSize = 32 * 1024
+const maxRetainedPathCap = 4 * 1024
 
 var fileBufferPool = sync.Pool{
 	New: func() any {
@@ -17,16 +21,27 @@ var fileBufferPool = sync.Pool{
 	},
 }
 
+var pathBufferPool = sync.Pool{
+	New: func() any {
+		return make([]byte, 0, 256)
+	},
+}
+
 type FileSystem interface {
 	ListRegularFiles(root string) ([]string, error)
 	Exists(path string) (bool, error)
 	CompareFile(left string, right string) (FileComparison, error)
+	CompareFileFromRoots(leftRoot string, rightRoot string, relPath string) (FileComparison, error)
 	FilesEqual(left string, right string) (bool, error)
 	FileSize(path string) (int64, error)
+	FileSizeFromRoot(root string, relPath string) (int64, error)
 	CopyFile(sourcePath string, targetPath string) error
+	CopyFileFromRoots(sourceRoot string, targetRoot string, relPath string) error
 	EnsureDirectory(path string) error
 	Remove(path string) error
+	RemoveFromRoot(root string, relPath string) error
 	RemoveEmptyParents(root string, start string) error
+	RemoveEmptyParentsFromRoot(root string, relPath string) error
 }
 
 type FileComparison struct {
@@ -106,6 +121,18 @@ func (fsys *OSFileSystem) FileSize(path string) (int64, error) {
 	return info.Size(), nil
 }
 
+func (fsys *OSFileSystem) FileSizeFromRoot(root string, relPath string) (int64, error) {
+	buffer := borrowPathBuffer(len(root) + len(relPath) + 1)
+	defer releasePathBuffer(buffer)
+
+	path := buildRootedPath(buffer, root, relPath)
+	info, err := os.Stat(bytesToStringView(path))
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
+}
+
 func (fsys *OSFileSystem) CopyFile(sourcePath string, targetPath string) error {
 	sourceFile, err := os.Open(sourcePath)
 	if err != nil {
@@ -133,6 +160,17 @@ func (fsys *OSFileSystem) CopyFile(sourcePath string, targetPath string) error {
 	return err
 }
 
+func (fsys *OSFileSystem) CopyFileFromRoots(sourceRoot string, targetRoot string, relPath string) error {
+	sourceBuffer := borrowPathBuffer(len(sourceRoot) + len(relPath) + 1)
+	targetBuffer := borrowPathBuffer(len(targetRoot) + len(relPath) + 1)
+	defer releasePathBuffer(sourceBuffer)
+	defer releasePathBuffer(targetBuffer)
+
+	sourcePath := bytesToStringView(buildRootedPath(sourceBuffer, sourceRoot, relPath))
+	targetPath := bytesToStringView(buildRootedPath(targetBuffer, targetRoot, relPath))
+	return fsys.CopyFile(sourcePath, targetPath)
+}
+
 func (fsys *OSFileSystem) EnsureDirectory(path string) error {
 	return os.MkdirAll(path, 0o755)
 }
@@ -141,23 +179,64 @@ func (fsys *OSFileSystem) Remove(path string) error {
 	return os.Remove(path)
 }
 
+func (fsys *OSFileSystem) RemoveFromRoot(root string, relPath string) error {
+	buffer := borrowPathBuffer(len(root) + len(relPath) + 1)
+	defer releasePathBuffer(buffer)
+
+	path := buildRootedPath(buffer, root, relPath)
+	return fsys.Remove(bytesToStringView(path))
+}
+
+func (fsys *OSFileSystem) CompareFileFromRoots(leftRoot string, rightRoot string, relPath string) (FileComparison, error) {
+	leftBuffer := borrowPathBuffer(len(leftRoot) + len(relPath) + 1)
+	rightBuffer := borrowPathBuffer(len(rightRoot) + len(relPath) + 1)
+	defer releasePathBuffer(leftBuffer)
+	defer releasePathBuffer(rightBuffer)
+
+	leftPath := bytesToStringView(buildRootedPath(leftBuffer, leftRoot, relPath))
+	rightPath := bytesToStringView(buildRootedPath(rightBuffer, rightRoot, relPath))
+
+	leftInfo, err := os.Stat(leftPath)
+	if err != nil {
+		return FileComparison{}, err
+	}
+	rightInfo, err := os.Stat(rightPath)
+	if err != nil {
+		return FileComparison{}, err
+	}
+	comparison := FileComparison{LeftSize: leftInfo.Size()}
+	if comparison.LeftSize != rightInfo.Size() {
+		return comparison, nil
+	}
+	comparison.Equal, err = compareFileContents(leftPath, rightPath)
+	return comparison, err
+}
+
 func (fsys *OSFileSystem) RemoveEmptyParents(root string, start string) error {
 	current := filepath.Dir(start)
 	cleanRoot := filepath.Clean(root)
 	for current != cleanRoot && current != "." {
-		entries, err := os.ReadDir(current)
-		if err != nil {
-			return err
-		}
-		if len(entries) > 0 {
+		err := os.Remove(current)
+		switch {
+		case err == nil:
+			current = filepath.Dir(current)
+		case os.IsNotExist(err):
+			current = filepath.Dir(current)
+		case isDirectoryNotEmptyError(err):
 			return nil
-		}
-		if err := os.Remove(current); err != nil {
+		default:
 			return err
 		}
-		current = filepath.Dir(current)
 	}
 	return nil
+}
+
+func (fsys *OSFileSystem) RemoveEmptyParentsFromRoot(root string, relPath string) error {
+	buffer := borrowPathBuffer(len(root) + len(relPath) + 1)
+	defer releasePathBuffer(buffer)
+
+	start := buildRootedPath(buffer, root, relPath)
+	return fsys.RemoveEmptyParents(root, bytesToStringView(start))
 }
 
 func compareFileContents(left string, right string) (bool, error) {
@@ -201,10 +280,65 @@ func compareReaders(left io.Reader, right io.Reader) (bool, error) {
 	}
 }
 
+func isDirectoryNotEmptyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.Errno(145))
+}
+
 func borrowFileBuffer() []byte {
 	return fileBufferPool.Get().([]byte)
 }
 
 func releaseFileBuffer(buffer []byte) {
 	fileBufferPool.Put(buffer[:fileCompareBufferSize])
+}
+
+func borrowPathBuffer(targetCap int) []byte {
+	buffer := pathBufferPool.Get().([]byte)
+	if cap(buffer) < targetCap {
+		return make([]byte, 0, targetCap)
+	}
+	return buffer[:0]
+}
+
+func releasePathBuffer(buffer []byte) {
+	if cap(buffer) > maxRetainedPathCap {
+		return
+	}
+	pathBufferPool.Put(buffer[:0])
+}
+
+func buildRootedPath(buffer []byte, root string, relPath string) []byte {
+	if root == "" {
+		return appendNativeRelativePath(buffer[:0], relPath)
+	}
+	buffer = append(buffer[:0], root...)
+	if !isPathSeparator(root[len(root)-1]) {
+		buffer = append(buffer, '\\')
+	}
+	return appendNativeRelativePath(buffer, relPath)
+}
+
+func appendNativeRelativePath(buffer []byte, relPath string) []byte {
+	for index := 0; index < len(relPath); index++ {
+		if relPath[index] == '/' {
+			buffer = append(buffer, '\\')
+			continue
+		}
+		buffer = append(buffer, relPath[index])
+	}
+	return buffer
+}
+
+func isPathSeparator(char byte) bool {
+	return char == '/' || char == '\\'
+}
+
+func bytesToStringView(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	return unsafe.String(unsafe.SliceData(raw), len(raw))
 }
