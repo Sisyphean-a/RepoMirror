@@ -147,12 +147,17 @@
   background: var(--panel-main);
 }
 
+.virtual-rows {
+  min-height: 100%;
+}
+
 .table-row {
-  min-height: 35px;
+  height: 35px;
   align-items: center;
   background: var(--panel-main);
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr) 72px;
+  box-sizing: border-box;
 }
 
 .table-row.alt {

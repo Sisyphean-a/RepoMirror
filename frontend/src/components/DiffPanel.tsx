@@ -1,7 +1,24 @@
+import { useEffect, useRef, useState, type UIEvent } from "react";
 import type { DiffEntry, DiffFilter, DiffSummary } from "../types";
 import { diffKindCode, diffKindLabel } from "../types";
 import { SearchIcon } from "./Icons";
 import { diffKindTone, formatSize } from "./ui";
+
+const rowHeightPx = 35;
+const overscanRows = 12;
+const fallbackVisibleRows = 16;
+
+interface VirtualRange {
+  startIndex: number;
+  endIndex: number;
+  paddingTop: number;
+  paddingBottom: number;
+}
+
+interface ViewportMetrics {
+  scrollTop: number;
+  viewportHeight: number;
+}
 
 interface DiffPanelProps {
   filter: DiffFilter;
@@ -94,8 +111,22 @@ function DiffTable({ rows }: { rows: DiffEntry[] }) {
   return (
     <div className="table-wrap">
       <TableHeader />
-      <div className="table-body">
-        {rows.map((entry, index) => <DiffRow entry={entry} alt={index % 2 === 0} key={`${entry.kind}-${entry.path}`} />)}
+      <VirtualizedDiffBody rows={rows} />
+    </div>
+  );
+}
+
+function VirtualizedDiffBody({ rows }: { rows: DiffEntry[] }) {
+  const { bodyRef, onScroll, range } = useVirtualRange(rows.length);
+  const visibleRows = rows.slice(range.startIndex, range.endIndex);
+
+  return (
+    <div className="table-body" ref={bodyRef} onScroll={onScroll}>
+      <div className="virtual-rows" style={{ paddingTop: range.paddingTop, paddingBottom: range.paddingBottom }}>
+        {visibleRows.map((entry, offset) => {
+          const index = range.startIndex + offset;
+          return <DiffRow entry={entry} alt={index % 2 === 0} key={`${entry.kind}-${entry.path}`} />;
+        })}
       </div>
     </div>
   );
@@ -123,6 +154,70 @@ function DiffRow({ entry, alt }: { entry: DiffEntry; alt: boolean }) {
       <span className="size-cell">{formatSize(entry.sizeBytes)}</span>
     </div>
   );
+}
+
+function useVirtualRange(rowCount: number) {
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [metrics, setMetrics] = useState<ViewportMetrics>({ scrollTop: 0, viewportHeight: 0 });
+
+  useEffect(() => {
+    const element = bodyRef.current;
+    if (!element) {
+      return;
+    }
+    syncViewportMetrics(element, setMetrics);
+    const observer = new ResizeObserver(() => syncViewportMetrics(element, setMetrics));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const element = bodyRef.current;
+    if (element) {
+      syncViewportMetrics(element, setMetrics);
+    }
+  }, [rowCount]);
+
+  const onScroll = (event: UIEvent<HTMLDivElement>) => {
+    const scrollTop = event.currentTarget.scrollTop;
+    setMetrics((current) => (current.scrollTop === scrollTop ? current : { ...current, scrollTop }));
+  };
+
+  return {
+    bodyRef,
+    onScroll,
+    range: calculateVisibleRange(rowCount, metrics.scrollTop, metrics.viewportHeight),
+  };
+}
+
+function syncViewportMetrics(
+  element: HTMLDivElement,
+  setMetrics: (value: ViewportMetrics | ((current: ViewportMetrics) => ViewportMetrics)) => void,
+) {
+  const nextMetrics = {
+    scrollTop: element.scrollTop,
+    viewportHeight: element.clientHeight,
+  };
+  setMetrics((current) =>
+    current.scrollTop === nextMetrics.scrollTop && current.viewportHeight === nextMetrics.viewportHeight
+      ? current
+      : nextMetrics,
+  );
+}
+
+function calculateVisibleRange(rowCount: number, scrollTop: number, viewportHeight: number): VirtualRange {
+  if (rowCount === 0) {
+    return { startIndex: 0, endIndex: 0, paddingTop: 0, paddingBottom: 0 };
+  }
+  const visibleRowCount = Math.max(fallbackVisibleRows, Math.ceil(viewportHeight / rowHeightPx));
+  const startIndex = Math.max(0, Math.floor(scrollTop / rowHeightPx) - overscanRows);
+  const endIndex = Math.min(rowCount, startIndex + visibleRowCount + overscanRows*2);
+  return {
+    startIndex,
+    endIndex,
+    paddingTop: startIndex * rowHeightPx,
+    paddingBottom: Math.max(0, (rowCount - endIndex) * rowHeightPx),
+  };
 }
 
 function renderFilterButton(

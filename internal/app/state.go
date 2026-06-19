@@ -2,23 +2,28 @@ package app
 
 import (
 	"fmt"
+	"sync"
 
 	"RepoMirror/internal/diff"
 	"RepoMirror/internal/model"
 )
 
+type repositoryProbe struct {
+	summary model.RepositorySummary
+	status  model.TargetRepositoryStatus
+}
+
 func (s *Service) buildState(cfg model.AppConfig) (model.DashboardState, error) {
+	repositoryA, repositoryB := s.probeRepositories(cfg)
 	state := model.DashboardState{
-		Config:      cfg,
-		RepositoryA: s.buildRepositorySummary(model.RepositorySlotA, cfg.ProjectA),
-		RepositoryB: s.buildRepositorySummary(model.RepositorySlotB, cfg.ProjectB),
-		SourceSlot:  cfg.Direction.SourceSlot(),
-		TargetSlot:  cfg.Direction.TargetSlot(),
-		Summary:     model.BuildDiffSummary(nil),
-		Differences: make([]model.DiffEntry, 0),
-	}
-	if err := s.enrichTargetStatus(&state); err != nil {
-		return model.DashboardState{}, err
+		Config:       cfg,
+		RepositoryA:  repositoryA.summary,
+		RepositoryB:  repositoryB.summary,
+		SourceSlot:   cfg.Direction.SourceSlot(),
+		TargetSlot:   cfg.Direction.TargetSlot(),
+		Summary:      model.BuildDiffSummary(nil),
+		Differences:  make([]model.DiffEntry, 0),
+		TargetStatus: targetStatusForSlot(cfg.Direction.TargetSlot(), repositoryA, repositoryB),
 	}
 	if err := s.enrichDifferences(&state); err != nil {
 		return model.DashboardState{}, err
@@ -26,53 +31,57 @@ func (s *Service) buildState(cfg model.AppConfig) (model.DashboardState, error) 
 	return state, nil
 }
 
-func (s *Service) buildRepositorySummary(slot model.RepositorySlot, path string) model.RepositorySummary {
+func (s *Service) probeRepositories(cfg model.AppConfig) (repositoryProbe, repositoryProbe) {
+	var waitGroup sync.WaitGroup
+	var repositoryA repositoryProbe
+	var repositoryB repositoryProbe
+
+	waitGroup.Add(2)
+	go func() {
+		defer waitGroup.Done()
+		repositoryA = s.probeRepository(model.RepositorySlotA, cfg.ProjectA)
+	}()
+	go func() {
+		defer waitGroup.Done()
+		repositoryB = s.probeRepository(model.RepositorySlotB, cfg.ProjectB)
+	}()
+	waitGroup.Wait()
+
+	return repositoryA, repositoryB
+}
+
+func (s *Service) probeRepository(slot model.RepositorySlot, path string) repositoryProbe {
 	summary := model.RepositorySummary{
 		Slot:         slot,
 		Path:         path,
 		Name:         model.RepositoryName(path),
 		IsConfigured: path != "",
 	}
+	probe := repositoryProbe{
+		summary: summary,
+		status: model.TargetRepositoryStatus{
+			Path: summary.Path,
+			Name: summary.Name,
+		},
+	}
 	if !summary.IsConfigured {
-		return summary
+		return probe
 	}
-	root, err := s.inspector.ResolveRepositoryRoot(path)
+	status, err := s.inspector.ReadTargetStatus(path)
 	if err != nil {
-		summary.ValidationError = err.Error()
-		return summary
+		probe.summary.ValidationError = err.Error()
+		probe.status.Error = err.Error()
+		return probe
 	}
-	summary.Path = root
-	summary.Name = model.RepositoryName(root)
-	summary.IsGitRepo = true
-	status, err := s.inspector.ReadTargetStatus(root)
-	if err != nil {
-		summary.ValidationError = err.Error()
-		return summary
-	}
-	summary.Branch = status.Branch
-	summary.IsClean = status.IsClean
-	summary.ModifiedCount = status.ModifiedCount
-	summary.UntrackedCount = status.UntrackedCount
-	return summary
-}
-
-func (s *Service) enrichTargetStatus(state *model.DashboardState) error {
-	target := targetSummary(*state)
-	state.TargetStatus = model.TargetRepositoryStatus{
-		Path:      target.Path,
-		Name:      target.Name,
-		IsGitRepo: target.IsGitRepo,
-		Error:     target.ValidationError,
-	}
-	if !target.IsGitRepo {
-		return nil
-	}
-	status, err := s.inspector.ReadTargetStatus(target.Path)
-	if err != nil {
-		return fmt.Errorf("failed to refresh target repository status: %w", err)
-	}
-	state.TargetStatus = status
-	return nil
+	probe.summary.Path = status.Path
+	probe.summary.Name = status.Name
+	probe.summary.IsGitRepo = true
+	probe.summary.Branch = status.Branch
+	probe.summary.IsClean = status.IsClean
+	probe.summary.ModifiedCount = status.ModifiedCount
+	probe.summary.UntrackedCount = status.UntrackedCount
+	probe.status = status
+	return probe
 }
 
 func (s *Service) enrichDifferences(state *model.DashboardState) error {
@@ -100,6 +109,26 @@ func sourceSummary(state model.DashboardState) model.RepositorySummary {
 		return state.RepositoryB
 	}
 	return state.RepositoryA
+}
+
+func targetStatusForSlot(
+	slot model.RepositorySlot,
+	repositoryA repositoryProbe,
+	repositoryB repositoryProbe,
+) model.TargetRepositoryStatus {
+	selected := repositoryA
+	if slot == model.RepositorySlotB {
+		selected = repositoryB
+	}
+	if selected.summary.IsGitRepo {
+		return selected.status
+	}
+	return model.TargetRepositoryStatus{
+		Path:      selected.summary.Path,
+		Name:      selected.summary.Name,
+		IsGitRepo: selected.summary.IsGitRepo,
+		Error:     selected.summary.ValidationError,
+	}
 }
 
 func targetSummary(state model.DashboardState) model.RepositorySummary {

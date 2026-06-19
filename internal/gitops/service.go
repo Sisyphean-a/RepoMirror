@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -45,30 +44,27 @@ func (s *Service) ListSyncableSourcePaths(repoPath string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	output, err := s.runner.Run(root, nil, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+	return s.ListSyncableSourcePathsFromRoot(root)
+}
+
+func (s *Service) ListSyncableSourcePathsFromRoot(root string) ([]string, error) {
+	output, err := s.runner.Run(root, nil, "ls-files", "--cached", "--others", "--exclude-standard", "--deduplicate", "-z")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list source files: %w", err)
 	}
+	deletedPaths, err := s.deletedPathSetFromRoot(root)
+	if err != nil {
+		return nil, err
+	}
 	paths := make([]string, 0)
 	for _, relPath := range splitNullSeparated(output) {
-		if isProtectedPath(relPath) {
-			continue
-		}
-		fullPath := filepath.Join(root, filepath.FromSlash(relPath))
-		info, statErr := os.Stat(fullPath)
-		if os.IsNotExist(statErr) {
-			continue
-		}
-		if statErr != nil {
-			return nil, statErr
-		}
-		if info.IsDir() {
+		if isProtectedPath(relPath) || deletedPaths[relPath] {
 			continue
 		}
 		paths = append(paths, relPath)
 	}
 	sort.Strings(paths)
-	return dedupe(paths), nil
+	return paths, nil
 }
 
 func (s *Service) IgnoredPaths(repoPath string, paths []string) (map[string]string, error) {
@@ -76,11 +72,15 @@ func (s *Service) IgnoredPaths(repoPath string, paths []string) (map[string]stri
 	if err != nil {
 		return nil, err
 	}
-	input := buildLineSeparatedInput(paths)
-	if input == "" {
+	return s.IgnoredPathsFromRoot(root, paths)
+}
+
+func (s *Service) IgnoredPathsFromRoot(root string, pathGroups ...[]string) (map[string]string, error) {
+	input := buildLineSeparatedInput(pathGroups...)
+	if len(input) == 0 {
 		return map[string]string{}, nil
 	}
-	output, err := s.runner.Run(root, []byte(input), "check-ignore", "-v", "--stdin", "--no-index")
+	output, err := s.runner.Run(root, input, "check-ignore", "-v", "--stdin", "--no-index")
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
@@ -88,7 +88,7 @@ func (s *Service) IgnoredPaths(repoPath string, paths []string) (map[string]stri
 		}
 		return nil, fmt.Errorf("failed to evaluate target ignore rules: %w", err)
 	}
-	ignored := make(map[string]string, len(paths))
+	ignored := make(map[string]string)
 	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
 		relPath, rule := parseIgnoredPathRule(line)
 		if relPath == "" {
@@ -99,29 +99,43 @@ func (s *Service) IgnoredPaths(repoPath string, paths []string) (map[string]stri
 	return ignored, nil
 }
 
-func buildLineSeparatedInput(paths []string) string {
+func buildLineSeparatedInput(pathGroups ...[]string) []byte {
 	buffer := bytes.NewBuffer(nil)
-	for _, path := range dedupe(paths) {
-		if path == "" {
-			continue
+	seen := make(map[string]struct{})
+	for _, paths := range pathGroups {
+		for _, path := range paths {
+			if path == "" {
+				continue
+			}
+			if _, exists := seen[path]; exists {
+				continue
+			}
+			seen[path] = struct{}{}
+			buffer.WriteString(path)
+			buffer.WriteByte('\n')
 		}
-		buffer.WriteString(path)
-		buffer.WriteByte('\n')
 	}
-	return buffer.String()
+	return buffer.Bytes()
 }
 
 func splitNullSeparated(raw []byte) []string {
 	if len(raw) == 0 {
 		return nil
 	}
-	parts := strings.Split(string(raw), "\x00")
-	paths := make([]string, 0, len(parts))
-	for _, part := range parts {
-		normalized := filepath.ToSlash(strings.TrimSpace(part))
-		if normalized != "" {
-			paths = append(paths, normalized)
+	paths := make([]string, 0, 32)
+	for start := 0; start < len(raw); {
+		end := bytes.IndexByte(raw[start:], 0)
+		if end == -1 {
+			end = len(raw) - start
 		}
+		part := bytes.TrimSpace(raw[start : start+end])
+		if len(part) > 0 {
+			paths = append(paths, filepath.ToSlash(string(part)))
+		}
+		if start+end >= len(raw) {
+			break
+		}
+		start += end + 1
 	}
 	return paths
 }
@@ -166,17 +180,16 @@ func isProtectedPath(relPath string) bool {
 	return false
 }
 
-func dedupe(paths []string) []string {
-	seen := make(map[string]bool, len(paths))
-	unique := make([]string, 0, len(paths))
-	for _, path := range paths {
-		if seen[path] {
-			continue
-		}
-		seen[path] = true
-		unique = append(unique, path)
+func (s *Service) deletedPathSetFromRoot(root string) (map[string]bool, error) {
+	output, err := s.runner.Run(root, nil, "ls-files", "--deleted", "-z")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list deleted source files: %w", err)
 	}
-	return unique
+	paths := make(map[string]bool)
+	for _, relPath := range splitNullSeparated(output) {
+		paths[relPath] = true
+	}
+	return paths, nil
 }
 
 type execRunner struct{}
@@ -193,19 +206,31 @@ func (execRunner) Run(repoPath string, input []byte, args ...string) ([]byte, er
 	return output, nil
 }
 
-func buildTargetStatus(repoPath string, branch string, statusOutput []byte) model.TargetRepositoryStatus {
+func buildTargetStatus(repoPath string, statusOutput []byte) model.TargetRepositoryStatus {
 	status := model.TargetRepositoryStatus{
 		Path:      repoPath,
 		Name:      model.RepositoryName(repoPath),
-		Branch:    branch,
+		Branch:    "HEAD",
 		IsGitRepo: true,
 	}
-	for _, line := range strings.Split(strings.TrimSpace(string(statusOutput)), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
+	for len(statusOutput) > 0 {
+		line, rest, found := bytes.Cut(statusOutput, []byte{'\n'})
+		statusOutput = rest
+		if !found {
+			statusOutput = nil
+		}
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 {
 			continue
 		}
-		if strings.HasPrefix(trimmed, "??") {
+		if branch, ok := parseBranchHead(trimmed); ok {
+			status.Branch = branch
+			continue
+		}
+		if trimmed[0] == '#' {
+			continue
+		}
+		if bytes.HasPrefix(trimmed, []byte("? ")) {
 			status.UntrackedCount++
 			continue
 		}
@@ -213,4 +238,16 @@ func buildTargetStatus(repoPath string, branch string, statusOutput []byte) mode
 	}
 	status.IsClean = status.ModifiedCount == 0 && status.UntrackedCount == 0
 	return status
+}
+
+func parseBranchHead(line []byte) (string, bool) {
+	const prefix = "# branch.head "
+	if !bytes.HasPrefix(line, []byte(prefix)) {
+		return "", false
+	}
+	branch := strings.TrimSpace(string(bytes.TrimPrefix(line, []byte(prefix))))
+	if branch == "" || branch == "(detached)" {
+		return "HEAD", true
+	}
+	return branch, true
 }

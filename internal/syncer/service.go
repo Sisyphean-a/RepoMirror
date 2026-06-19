@@ -68,18 +68,7 @@ func (s *Service) applyDeletes(request Request, entries []model.DiffEntry) error
 func (s *Service) copyFile(request Request, relPath string) error {
 	sourcePath := joinPath(request.SourceRoot, relPath)
 	targetPath := joinPath(request.TargetRoot, relPath)
-	data, err := s.fs.ReadFile(sourcePath)
-	if err != nil {
-		return err
-	}
-	mode, err := s.fs.FileMode(sourcePath)
-	if err != nil {
-		return err
-	}
-	if err := s.fs.EnsureDirectory(filepath.Dir(targetPath)); err != nil {
-		return err
-	}
-	return s.fs.WriteFile(targetPath, data, mode)
+	return s.fs.CopyFile(sourcePath, targetPath)
 }
 
 func joinPath(root string, relPath string) string {

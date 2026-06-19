@@ -3,28 +3,36 @@ package gitops
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"RepoMirror/internal/model"
 )
 
 func (s *Service) ReadTargetStatus(repoPath string) (model.TargetRepositoryStatus, error) {
-	root, err := s.ResolveRepositoryRoot(repoPath)
-	if err != nil {
-		return model.TargetRepositoryStatus{}, err
+	var waitGroup sync.WaitGroup
+	var root string
+	var rootErr error
+	var statusOutput []byte
+	var statusErr error
+
+	waitGroup.Add(2)
+	go func() {
+		defer waitGroup.Done()
+		root, rootErr = s.ResolveRepositoryRoot(repoPath)
+	}()
+	go func() {
+		defer waitGroup.Done()
+		statusOutput, statusErr = s.runner.Run(repoPath, nil, "status", "--porcelain=2", "--branch")
+	}()
+	waitGroup.Wait()
+
+	if rootErr != nil {
+		return model.TargetRepositoryStatus{}, rootErr
 	}
-	branchOutput, err := s.runner.Run(root, nil, "branch", "--show-current")
-	if err != nil {
-		return model.TargetRepositoryStatus{}, fmt.Errorf("failed to read branch: %w", err)
+	if statusErr != nil {
+		return model.TargetRepositoryStatus{}, fmt.Errorf("failed to read target status: %w", statusErr)
 	}
-	statusOutput, err := s.runner.Run(root, nil, "status", "--short")
-	if err != nil {
-		return model.TargetRepositoryStatus{}, fmt.Errorf("failed to read target status: %w", err)
-	}
-	branch := strings.TrimSpace(string(branchOutput))
-	if branch == "" {
-		branch = "HEAD"
-	}
-	return buildTargetStatus(root, branch, statusOutput), nil
+	return buildTargetStatus(root, statusOutput), nil
 }
 
 func (s *Service) Commit(repoPath string, message string) error {

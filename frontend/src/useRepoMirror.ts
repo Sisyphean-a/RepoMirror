@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useState } from "react";
 import {
   commitTarget,
   loadState,
@@ -46,6 +46,7 @@ export function useRepoMirror(): ViewModel {
   const [notice, setNotice] = useState("");
   const [commitMessage, setCommitMessage] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
+  const deferredSearchTerm = useDeferredValue(searchTerm);
 
   useEffect(() => {
     void executeAction(
@@ -55,7 +56,7 @@ export function useRepoMirror(): ViewModel {
     );
   }, []);
 
-  const visibleEntries = filterEntries(state?.differences ?? [], filter, searchTerm);
+  const visibleEntries = filterEntries(state?.differences ?? [], filter, deferredSearchTerm);
   const action = actionFactory({
     commitMessage,
     setBusy,

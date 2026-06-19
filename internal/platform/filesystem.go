@@ -3,24 +3,35 @@ package platform
 import (
 	"bytes"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
+	"sync"
 )
+
+const fileCompareBufferSize = 32 * 1024
+
+var fileBufferPool = sync.Pool{
+	New: func() any {
+		return make([]byte, fileCompareBufferSize)
+	},
+}
 
 type FileSystem interface {
 	ListRegularFiles(root string) ([]string, error)
 	Exists(path string) (bool, error)
+	CompareFile(left string, right string) (FileComparison, error)
 	FilesEqual(left string, right string) (bool, error)
 	FileSize(path string) (int64, error)
-	ReadFile(path string) ([]byte, error)
-	WriteFile(path string, data []byte, perm fs.FileMode) error
-	FileMode(path string) (fs.FileMode, error)
+	CopyFile(sourcePath string, targetPath string) error
 	EnsureDirectory(path string) error
 	Remove(path string) error
 	RemoveEmptyParents(root string, start string) error
+}
+
+type FileComparison struct {
+	Equal    bool
+	LeftSize int64
 }
 
 type OSFileSystem struct{}
@@ -48,7 +59,6 @@ func (fsys *OSFileSystem) ListRegularFiles(root string) ([]string, error) {
 		files = append(files, filepath.ToSlash(rel))
 		return nil
 	})
-	sort.Strings(files)
 	return files, err
 }
 
@@ -63,19 +73,29 @@ func (fsys *OSFileSystem) Exists(path string) (bool, error) {
 	return false, err
 }
 
-func (fsys *OSFileSystem) FilesEqual(left string, right string) (bool, error) {
+func (fsys *OSFileSystem) CompareFile(left string, right string) (FileComparison, error) {
 	leftInfo, err := os.Stat(left)
 	if err != nil {
-		return false, err
+		return FileComparison{}, err
 	}
 	rightInfo, err := os.Stat(right)
 	if err != nil {
+		return FileComparison{}, err
+	}
+	comparison := FileComparison{LeftSize: leftInfo.Size()}
+	if comparison.LeftSize != rightInfo.Size() {
+		return comparison, nil
+	}
+	comparison.Equal, err = compareFileContents(left, right)
+	return comparison, err
+}
+
+func (fsys *OSFileSystem) FilesEqual(left string, right string) (bool, error) {
+	comparison, err := fsys.CompareFile(left, right)
+	if err != nil {
 		return false, err
 	}
-	if leftInfo.Size() != rightInfo.Size() {
-		return false, nil
-	}
-	return compareFileContents(left, right)
+	return comparison.Equal, nil
 }
 
 func (fsys *OSFileSystem) FileSize(path string) (int64, error) {
@@ -86,20 +106,31 @@ func (fsys *OSFileSystem) FileSize(path string) (int64, error) {
 	return info.Size(), nil
 }
 
-func (fsys *OSFileSystem) ReadFile(path string) ([]byte, error) {
-	return os.ReadFile(path)
-}
-
-func (fsys *OSFileSystem) WriteFile(path string, data []byte, perm fs.FileMode) error {
-	return os.WriteFile(path, data, perm.Perm())
-}
-
-func (fsys *OSFileSystem) FileMode(path string) (fs.FileMode, error) {
-	info, err := os.Stat(path)
+func (fsys *OSFileSystem) CopyFile(sourcePath string, targetPath string) error {
+	sourceFile, err := os.Open(sourcePath)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	return info.Mode(), nil
+	defer sourceFile.Close()
+
+	sourceInfo, err := sourceFile.Stat()
+	if err != nil {
+		return err
+	}
+	if err := fsys.EnsureDirectory(filepath.Dir(targetPath)); err != nil {
+		return err
+	}
+	targetFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, sourceInfo.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	defer targetFile.Close()
+
+	buffer := borrowFileBuffer()
+	defer releaseFileBuffer(buffer)
+
+	_, err = io.CopyBuffer(targetFile, sourceFile, buffer)
+	return err
 }
 
 func (fsys *OSFileSystem) EnsureDirectory(path string) error {
@@ -142,13 +173,38 @@ func compareFileContents(left string, right string) (bool, error) {
 	}
 	defer rightFile.Close()
 
-	leftContent, err := io.ReadAll(leftFile)
-	if err != nil {
-		return false, err
+	return compareReaders(leftFile, rightFile)
+}
+
+func compareReaders(left io.Reader, right io.Reader) (bool, error) {
+	leftBuffer := borrowFileBuffer()
+	rightBuffer := borrowFileBuffer()
+	defer releaseFileBuffer(leftBuffer)
+	defer releaseFileBuffer(rightBuffer)
+
+	for {
+		leftRead, leftErr := left.Read(leftBuffer)
+		rightRead, rightErr := right.Read(rightBuffer)
+
+		if leftRead != rightRead || !bytes.Equal(leftBuffer[:leftRead], rightBuffer[:rightRead]) {
+			return false, nil
+		}
+		if leftErr == io.EOF || rightErr == io.EOF {
+			return leftErr == io.EOF && rightErr == io.EOF, nil
+		}
+		if leftErr != nil {
+			return false, leftErr
+		}
+		if rightErr != nil {
+			return false, rightErr
+		}
 	}
-	rightContent, err := io.ReadAll(rightFile)
-	if err != nil {
-		return false, err
-	}
-	return bytes.Equal(leftContent, rightContent), nil
+}
+
+func borrowFileBuffer() []byte {
+	return fileBufferPool.Get().([]byte)
+}
+
+func releaseFileBuffer(buffer []byte) {
+	fileBufferPool.Put(buffer[:fileCompareBufferSize])
 }
