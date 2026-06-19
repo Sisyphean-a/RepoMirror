@@ -215,7 +215,21 @@ func appendNativeRelativePath(buffer []byte, relPath string) []byte {
 }
 
 func relativeDirectoryKey(relPath string) string {
-	for index := len(relPath) - 1; index >= 0; index-- {
+	for index := len(relPath) - 1; index >= 3; index -= 4 {
+		if relPath[index] == '/' {
+			return relPath[:index]
+		}
+		if relPath[index-1] == '/' {
+			return relPath[:index-1]
+		}
+		if relPath[index-2] == '/' {
+			return relPath[:index-2]
+		}
+		if relPath[index-3] == '/' {
+			return relPath[:index-3]
+		}
+	}
+	for index := min(2, len(relPath)-1); index >= 0; index-- {
 		if relPath[index] == '/' {
 			return relPath[:index]
 		}

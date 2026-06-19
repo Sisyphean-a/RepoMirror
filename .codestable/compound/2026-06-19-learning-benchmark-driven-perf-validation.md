@@ -440,3 +440,32 @@ profile 直觉上像是在用更便宜的原语替代热点判断，但 `Benchma
 1. `inline` 容量要按“每个 worker 的唯一值数量”看，不要只看总条目数。
 2. 如果 CPU 提升不稳定，但分配下降幅度明显，且目标 benchmark 的中位数没有变坏，可以接受这种以内存为主的收益。
 3. 这类阈值调整一定要做成对对照，否则很容易被单次抖动误导成“只是噪声”。
+
+# 单字符热点可以试受控展开，但必须用成对对照兜底
+
+当 profile 明确指出热点集中在“逐字节扫一个单字符”的超小函数上时，可以尝试受控展开循环，让每轮多检查几个固定偏移，减少分支回跳成本。
+
+这次在 `internal/syncer/service.go` 的 `relativeDirectoryKey` 上，profile 里它单独占了 `BenchmarkApplyDeletesManyFilesSameDirs` 大约 `30%` 的 CPU。路径契约已经明确为 slash-only，于是把原来的：
+
+1. `for index := len(relPath)-1; index >= 0; index--`
+2. 每轮只检查一个 `relPath[index] == '/'`
+
+改成：
+
+1. 每轮回退 `4` 个字符
+2. 在同一轮里顺序检查 `index/index-1/index-2/index-3`
+3. 最后再用一个很短的尾循环收尾
+
+同 session、同命令、5 次成对对照结果：
+
+- `BenchmarkApplyDeletesManyFilesSameDirs`
+- candidate: `average 47504.6 ns/op`, `median 59920 ns/op`, `1792 B/op`, `13 allocs/op`
+- baseline: `average 48842.2 ns/op`, `median 61579 ns/op`, `1792 B/op`, `13 allocs/op`
+
+`BenchmarkApplyCopiesManyFiles` 没走这条路径，只作为回归哨兵；候选和基线都维持在同一量级，没有副作用。
+
+要点是：
+
+1. 这种展开只适合“契约明确、目标字符单一、代码仍短小可读”的热点。
+2. 不要一上来就用更激进的 SIMD 风格改写，先试 2/4 步这种可维护的受控展开。
+3. 展开类优化很容易只是在吃 benchmark 噪声，所以必须做同 session 的候选/基线对照，不能只看单边结果。
