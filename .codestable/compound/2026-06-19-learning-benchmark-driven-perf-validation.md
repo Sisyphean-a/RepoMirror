@@ -270,3 +270,37 @@ profile 直觉上像是在用更便宜的原语替代热点判断，但 `Benchma
 这说明在当前数据分布里，`relativeDirectoryKey` 的输入路径并不长，而两次完整扫描整串的成本高于一次从尾部尽早命中的倒扫。
 
 要点是：当目标字符集合很小、而且目标位置通常靠近字符串尾部时，一次倒扫可能比“对每个候选字符各扫一遍整串”更便宜。不要因为 profile 上某个小判断函数显眼，就默认库函数搜索一定更优。
+
+# 布尔化分支不一定优于小整数计数
+
+把一小段“先计数再分支”的逻辑改成“预先算若干布尔量，再直接写条件”时，也不能默认它会更快。
+
+这次在 `internal/app/state.go` 的 `runStateTasks` 里试过把：
+
+1. `statusTasks := 0`
+2. 按 `repositoryA.root != ""` / `repositoryB.root != ""` 累加
+3. 再按 `statusTasks` 进入各个 `switch` 分支
+
+改成：
+
+1. 先算 `hasStatusA` / `hasStatusB`
+2. 直接用布尔组合判断四类路径
+
+从代码直觉看，这像是在减少整数累加和比较，但同 session 对照并没有形成一致净收益：
+
+- `BenchmarkLoadStateConfiguredRepositories`
+- candidate: `average 3898.0 ns/op`, `median 4013 ns/op`
+- baseline: `average 4033.8 ns/op`, `median 4360 ns/op`
+- `BenchmarkLoadStateStatusFailureShortCircuit`
+- candidate: `average 5181.4 ns/op`, `median 5197 ns/op`
+- baseline: `average 5079.4 ns/op`, `median 5056 ns/op`
+- `BenchmarkLoadStateSingleConfiguredRepository`
+- candidate: `average 552.9 ns/op`, `median 544.3 ns/op`
+- baseline: `average 575.9 ns/op`, `median 574.8 ns/op`
+- `BenchmarkLoadStateUnconfiguredRepositories`
+- candidate: `average 423.7 ns/op`, `median 434.2 ns/op`
+- baseline: `average 449.6 ns/op`, `median 440.6 ns/op`
+
+这里不能只看三条 benchmark 略好就保留，因为 `BenchmarkLoadStateStatusFailureShortCircuit` 是 `LoadState` 的关键失败分支之一，而且它稳定变差。说明这种“布尔化条件”更多是在改变分支形态，而不是减少实质成本。
+
+要点是：当原逻辑里的计数范围很小、最多只有 `0/1/2` 三种状态时，改成多个布尔条件并不会天然更轻。只要关键路径 benchmark 没有一起改善，就应直接回退。
