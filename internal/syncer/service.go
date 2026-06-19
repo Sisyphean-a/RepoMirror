@@ -46,6 +46,42 @@ func (s *Service) applyCopies(request Request, entries []model.DiffEntry, copyCo
 		return nil
 	}
 	workerCount := min(copyCount, copyWorkerCount())
+	if copyCount == len(entries) {
+		return s.applyAllCopies(request, entries, workerCount)
+	}
+	return s.applyMatchingCopies(request, entries, workerCount)
+}
+
+func (s *Service) applyAllCopies(request Request, entries []model.DiffEntry, workerCount int) error {
+	var waitGroup sync.WaitGroup
+	var firstErr error
+	var errOnce sync.Once
+	var stop atomic.Bool
+	copyWork := func(worker int) {
+		defer waitGroup.Done()
+		for index := worker; index < len(entries); index += workerCount {
+			if stop.Load() {
+				return
+			}
+			if err := s.copyFile(request, entries[index].Path); err != nil {
+				errOnce.Do(func() {
+					firstErr = err
+					stop.Store(true)
+				})
+				return
+			}
+		}
+	}
+
+	waitGroup.Add(workerCount)
+	for worker := 0; worker < workerCount; worker++ {
+		go copyWork(worker)
+	}
+	waitGroup.Wait()
+	return firstErr
+}
+
+func (s *Service) applyMatchingCopies(request Request, entries []model.DiffEntry, workerCount int) error {
 	var waitGroup sync.WaitGroup
 	var firstErr error
 	var errOnce sync.Once

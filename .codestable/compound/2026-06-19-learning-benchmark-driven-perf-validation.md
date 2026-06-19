@@ -385,3 +385,32 @@ profile 直觉上像是在用更便宜的原语替代热点判断，但 `Benchma
 1. 先证明“异常输入形态在这条链路里不会出现”，再收紧热点契约。
 2. 兼容逻辑应当留在边界层，而不是在高频内部循环里每次重复判断。
 3. 如果未来新增了会写入反斜杠路径的生产端，应当修生产端或补测试，而不是把热点重新放宽成双分隔符兜底。
+
+# 全量命中时要拆专用快路径，不要把条件塞回热循环
+
+如果 benchmark 输入已经能证明“这一段循环里每个条目都属于同一类”，最稳的优化方式通常不是在循环里额外加一个布尔开关，而是把这类场景单独拆成专用 helper。
+
+这次在 `internal/syncer/service.go` 的复制链路上，`BenchmarkApplyCopiesManyFiles` 的输入全部都是 `added/modified`，因此 `applyCopies` 里每轮都做：
+
+1. 读取 `entry.Kind`
+2. 判断是否为 `added/modified`
+3. 再决定是否执行 `copyFile`
+
+这层判断在该 benchmark 下是纯额外成本，所以把它拆成：
+
+1. `copyCount == len(entries)` 时走 `applyAllCopies`
+2. 其他情况继续走通用的 `applyMatchingCopies`
+
+同 session、同命令、5 次成对对照结果：
+
+- `BenchmarkApplyCopiesManyFiles`
+- candidate: `average 16277.6 ns/op`, `median 16300 ns/op`, `352 B/op`, `12 allocs/op`
+- baseline: `average 19804.4 ns/op`, `median 19796 ns/op`, `352 B/op`, `12 allocs/op`
+
+中间还试过把“全量命中”布尔直接塞回 `applyCopies` / `applyDeletes` 原循环里。那版虽然让复制 benchmark 变快，但会让删除 benchmark 回退，而且复制 benchmark 的分配也抬高到 `368 B/op`。拆成独立 helper 后，复制收益保住了，分配也回到基线。
+
+要点是：
+
+1. “所有元素都命中”这类更强契约，优先拆独立函数，不要让通用热循环背额外状态。
+2. 看起来形状相近的两个热点（这里是 copy 和 delete）也不能共用同一条假设，必须分别验证。
+3. 如果候选让目标 benchmark 变快，但顺手引入了新的分配或拖慢旁路 benchmark，先拆分路径再验证，不要急着提交混合版本。
