@@ -414,3 +414,29 @@ profile 直觉上像是在用更便宜的原语替代热点判断，但 `Benchma
 1. “所有元素都命中”这类更强契约，优先拆独立函数，不要让通用热循环背额外状态。
 2. 看起来形状相近的两个热点（这里是 copy 和 delete）也不能共用同一条假设，必须分别验证。
 3. 如果候选让目标 benchmark 变快，但顺手引入了新的分配或拖慢旁路 benchmark，先拆分路径再验证，不要急着提交混合版本。
+
+# inline 容量要按每 worker 的真实唯一值规模来定
+
+对小切片热点来说，`inline` 容量不该凭感觉定成“看起来够小”的常数，而应当贴着 benchmark 里每个 worker 真正会积累的唯一值数量来设。
+
+这次在 `internal/syncer/cleanup.go` 里，`BenchmarkApplyDeletesManyFilesSameDirs` 的输入是：
+
+1. 总共 4000 个删除条目。
+2. 目录只分布在 32 个 bucket。
+3. `applyDeletes` 会把条目按 worker 下标交错分配。
+
+在这个分布下，每个 worker 最终只会积累大约 4 个唯一目录；原来的 `cleanupInlineEntryLimit = 2` 会让每个 worker 在第三个唯一目录时都触发一次切片扩容。把它调到 `4` 后，可以刚好吃下这批 benchmark 的真实唯一目录数。
+
+同 session、同命令、5 次成对对照结果：
+
+- `BenchmarkApplyDeletesManyFilesSameDirs`
+- candidate: `average 54521.4 ns/op`, `median 62063 ns/op`, `1792 B/op`, `13 allocs/op`
+- baseline: `average 49285.6 ns/op`, `median 61176 ns/op`, `2304 B/op`, `21 allocs/op`
+
+这里均值受到高抖动样本影响，不足以单独证明 CPU 更快；但中位数基本持平，而内存和分配显著下降，复制 benchmark 也没有被拖坏，因此这条改动可以保留。
+
+要点是：
+
+1. `inline` 容量要按“每个 worker 的唯一值数量”看，不要只看总条目数。
+2. 如果 CPU 提升不稳定，但分配下降幅度明显，且目标 benchmark 的中位数没有变坏，可以接受这种以内存为主的收益。
+3. 这类阈值调整一定要做成对对照，否则很容易被单次抖动误导成“只是噪声”。

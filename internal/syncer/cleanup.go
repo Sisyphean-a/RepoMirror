@@ -13,7 +13,7 @@ type cleanupGroup struct {
 	seen    map[string]struct{}
 }
 
-const cleanupInlineEntryLimit = 2
+const cleanupInlineEntryLimit = 4
 const cleanupLinearScanLimit = 16
 
 func removeUniqueCleanupPaths(fs platform.FileSystem, root string, cleanupGroups []cleanupGroup) error {
