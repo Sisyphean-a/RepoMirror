@@ -6,6 +6,10 @@ export function CommitTarget(arg1) {
   return window['go']['main']['App']['CommitTarget'](arg1);
 }
 
+export function GenerateCommitMessage() {
+  return window['go']['main']['App']['GenerateCommitMessage']();
+}
+
 export function LoadState() {
   return window['go']['main']['App']['LoadState']();
 }
@@ -24,6 +28,10 @@ export function SaveConfig() {
 
 export function SelectRepository(arg1) {
   return window['go']['main']['App']['SelectRepository'](arg1);
+}
+
+export function SetAICommitAPIKey(arg1) {
+  return window['go']['main']['App']['SetAICommitAPIKey'](arg1);
 }
 
 export function SetDirection(arg1) {

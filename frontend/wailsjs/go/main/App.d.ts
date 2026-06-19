@@ -4,6 +4,8 @@ import {model} from '../models';
 
 export function CommitTarget(arg1:string):Promise<model.DashboardState>;
 
+export function GenerateCommitMessage():Promise<string>;
+
 export function LoadState():Promise<model.DashboardState>;
 
 export function PushTarget():Promise<model.DashboardState>;
@@ -13,6 +15,8 @@ export function Refresh():Promise<model.DashboardState>;
 export function SaveConfig():Promise<model.DashboardState>;
 
 export function SelectRepository(arg1:string):Promise<model.DashboardState>;
+
+export function SetAICommitAPIKey(arg1:string):Promise<model.DashboardState>;
 
 export function SetDirection(arg1:string):Promise<model.DashboardState>;
 

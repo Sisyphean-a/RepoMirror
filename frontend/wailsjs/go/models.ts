@@ -6,6 +6,7 @@ export namespace model {
 	    direction: string;
 	    windowWidth: number;
 	    windowHeight: number;
+	    aiCommitApiKey?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppConfig(source);
@@ -18,6 +19,7 @@ export namespace model {
 	        this.direction = source["direction"];
 	        this.windowWidth = source["windowWidth"];
 	        this.windowHeight = source["windowHeight"];
+	        this.aiCommitApiKey = source["aiCommitApiKey"];
 	    }
 	}
 	export class TargetRepositoryStatus {
@@ -112,6 +114,7 @@ export namespace model {
 	}
 	export class DashboardState {
 	    config: AppConfig;
+	    aiCommitConfigured: boolean;
 	    repositoryA: RepositorySummary;
 	    repositoryB: RepositorySummary;
 	    sourceSlot: string;
@@ -128,6 +131,7 @@ export namespace model {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.config = this.convertValues(source["config"], AppConfig);
+	        this.aiCommitConfigured = source["aiCommitConfigured"];
 	        this.repositoryA = this.convertValues(source["repositoryA"], RepositorySummary);
 	        this.repositoryB = this.convertValues(source["repositoryB"], RepositorySummary);
 	        this.sourceSlot = source["sourceSlot"];
