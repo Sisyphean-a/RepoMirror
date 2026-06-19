@@ -95,3 +95,31 @@ tags:
 - baseline: `average 161255.7 ns/op`, `median 173760 ns/op`
 
 要点不是“看到字符串就上 `IndexByte`”，而是先确认热点确实来自大量无效字符扫描，再把线性扫整串改成“只扫目标字符命中点”。
+
+# 预分配写入不一定优于 append
+
+即使 profile 里 `buildSingleGroupInputWithoutDedup` 仍然占了可见 CPU，也不能直接把它改成“先按总长度扩容，再用 `copy` + 写换行符做定长写入”。
+
+这次在 `internal/gitops/service.go` 的单组有序路径上试过把：
+
+1. `analyzeSingleGroupPaths` 识别出的“非空、严格升序”输入走专用快路径。
+2. 快路径改成 `buffer = buffer[:totalBytes]` 后按偏移量 `copy` 整段路径，再手写 `'\n'`。
+
+同 session 的 5 次候选/基线对照结果没有形成稳定净收益：
+
+- `BenchmarkIgnoredPathsFromRoot`
+- candidate: `average 71325.8 ns/op`, `median 78052 ns/op`
+- baseline: `average 74378.8 ns/op`, `median 82466 ns/op`
+- `BenchmarkIgnoredPathSetFromRootSorted`
+- candidate: `average 44075.8 ns/op`, `median 43478 ns/op`
+- baseline: `average 44552.6 ns/op`, `median 42474 ns/op`
+
+第一条 benchmark 看起来略快，但第二条的中位数反而更差，而且两边 `B/op`、`allocs/op` 都没变。这类结果说明收益只停留在噪声边缘，不足以支撑保留代码复杂度。
+
+判断标准不是“均值有一点点优势”就算赢，而是要看：
+
+1. 同一实现是否在关联 benchmark 上同时成立。
+2. 中位数是否也支持这个结论，而不是只有均值被几次抖动拉动。
+3. 是否真的换来了更少分配或更明确的热点消除。
+
+如果三条里有一条站不住，就把这种“预分配 + 手写 copy”视为未证实优化，直接回退。
