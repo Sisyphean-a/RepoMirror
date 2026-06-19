@@ -213,15 +213,15 @@ func (fsys *OSFileSystem) CompareFileFromRoots(leftRoot string, rightRoot string
 }
 
 func (fsys *OSFileSystem) RemoveEmptyParents(root string, start string) error {
-	current := filepath.Dir(start)
 	cleanRoot := filepath.Clean(root)
+	current := parentDirectory(start)
 	for current != cleanRoot && current != "." {
 		err := os.Remove(current)
 		switch {
 		case err == nil:
-			current = filepath.Dir(current)
+			current = parentDirectory(current)
 		case os.IsNotExist(err):
-			current = filepath.Dir(current)
+			current = parentDirectory(current)
 		case isDirectoryNotEmptyError(err):
 			return nil
 		default:
@@ -229,6 +229,32 @@ func (fsys *OSFileSystem) RemoveEmptyParents(root string, start string) error {
 		}
 	}
 	return nil
+}
+
+func parentDirectory(path string) string {
+	end := len(path) - 1
+	for end > 0 && os.IsPathSeparator(path[end]) {
+		end--
+	}
+	for end >= 0 {
+		if os.IsPathSeparator(path[end]) {
+			break
+		}
+		end--
+	}
+	if end <= 0 {
+		if len(path) != 0 && os.IsPathSeparator(path[0]) {
+			return path[:1]
+		}
+		return "."
+	}
+	for end > 0 && os.IsPathSeparator(path[end-1]) {
+		end--
+	}
+	if end == 0 {
+		return path[:1]
+	}
+	return path[:end]
 }
 
 func (fsys *OSFileSystem) RemoveEmptyParentsFromRoot(root string, relPath string) error {
