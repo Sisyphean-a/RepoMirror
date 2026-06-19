@@ -280,7 +280,7 @@ func (execRunner) Run(repoPath string, input []byte, args ...string) ([]byte, er
 }
 
 func buildTargetStatus(repoPath string, statusOutput []byte) model.TargetRepositoryStatus {
-	cleanRepoPath := filepath.Clean(repoPath)
+	cleanRepoPath := cleanRepositoryPath(repoPath)
 	status := model.TargetRepositoryStatus{
 		Path:      cleanRepoPath,
 		Name:      repositoryNameFromCleanPath(cleanRepoPath),
@@ -334,7 +334,58 @@ func repositoryNameFromCleanPath(cleanPath string) string {
 	if cleanPath == "" || cleanPath == "." || cleanPath == string(filepath.Separator) {
 		return cleanPath
 	}
-	return filepath.Base(cleanPath)
+	for index := len(cleanPath) - 1; index >= 0; index-- {
+		if cleanPath[index] == filepath.Separator || cleanPath[index] == '/' {
+			return cleanPath[index+1:]
+		}
+	}
+	return cleanPath
+}
+
+func cleanRepositoryPath(repoPath string) string {
+	if repoPath == "" {
+		return ""
+	}
+	if requiresFullPathClean(repoPath) {
+		return filepath.Clean(repoPath)
+	}
+	if strings.IndexByte(repoPath, '/') < 0 {
+		return repoPath
+	}
+	buffer := make([]byte, len(repoPath))
+	for index := 0; index < len(repoPath); index++ {
+		if repoPath[index] == '/' {
+			buffer[index] = filepath.Separator
+			continue
+		}
+		buffer[index] = repoPath[index]
+	}
+	return string(buffer)
+}
+
+func requiresFullPathClean(repoPath string) bool {
+	segmentStart := 0
+	lastWasSeparator := false
+	for index := 0; index < len(repoPath); index++ {
+		if !isRepoPathSeparator(repoPath[index]) {
+			lastWasSeparator = false
+			continue
+		}
+		if index == len(repoPath)-1 || lastWasSeparator || isDotPathSegment(repoPath[segmentStart:index]) {
+			return true
+		}
+		segmentStart = index + 1
+		lastWasSeparator = true
+	}
+	return isDotPathSegment(repoPath[segmentStart:])
+}
+
+func isDotPathSegment(segment string) bool {
+	return segment == "." || segment == ".."
+}
+
+func isRepoPathSeparator(char byte) bool {
+	return char == filepath.Separator || char == '/'
 }
 
 func parseTaggedPath(item string) (string, string) {
