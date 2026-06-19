@@ -187,3 +187,29 @@ tags:
 - baseline: `average 169364.4 ns/op`, `median 188567 ns/op`
 
 这个优化能保留的关键，不是“少一次加法”这么简单，而是它顺着真实数据分布改写了计数逻辑：把最常见路径变成默认成本，把少见分支留给增量处理。
+
+# 热点循环里减少拆包不等于更快
+
+profile 里看到热点函数存在一个小 helper 调用时，不能直接推断“把 helper 展开到循环里、少掉返回值拆包”就会更快。
+
+这次在 `internal/diff/service.go` 里试过把 `resolveComparedEntryRange` 从：
+
+1. 调 `unresolvedCompareEntry(resolved[index])`
+2. 解出 `relPath`、`targetExists`、`ok`
+
+改成：
+
+1. 直接读 `resolved[index]`
+2. 用 `entry.SizeBytes` 原地判断两种 unresolved 标记
+3. 直接把 `entry.Path` 传给 `diffFromSourceFile`
+
+这类改写看上去减少了一次小函数调用和三元组拆包，但同 session 的候选 benchmark 反而回退：
+
+- `BenchmarkCalculateLargeDiff`
+- candidate: `average 167893.6 ns/op`, `median 180176 ns/op`
+- `BenchmarkMergedPathCount`
+- candidate: `average 17230.8 ns/op`, `median 17325 ns/op`
+
+这里虽然没有再做成对基线对照，但已经足够说明这个候选不值得继续：它既没有带来新的分配下降，也没有让相邻 benchmark 呈现更强的改善信号。
+
+要点是：热点循环里的局部“少一层 helper”如果只是把原本已经很轻的判定逻辑平铺开，常常只是在交换编译器优化形态，而不是实质性减少成本。这类尝试一旦首轮 benchmark 没有显著改善，就应直接回退，不要为它再投入完整对照轮次。
