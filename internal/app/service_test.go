@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"RepoMirror/internal/config"
@@ -179,6 +180,63 @@ func TestServiceSyncCommitAndPushFlow(t *testing.T) {
 	}
 }
 
+func TestServiceGenerateCommitMessageUsesSavedKey(t *testing.T) {
+	target := t.TempDir()
+	testutil.InitRepo(t, target)
+	testutil.WriteFile(t, target, "tracked.txt", "base")
+	testutil.CommitAll(t, target, "init")
+	testutil.WriteFile(t, target, "tracked.txt", "next")
+	testutil.WriteFile(t, target, "added.txt", "new")
+
+	store := config.NewStoreWithPath(filepath.Join(t.TempDir(), "config.json"))
+	service := newTestService(t, store, &selectorStub{}, model.AppConfig{
+		ProjectA:       target,
+		Direction:      model.DirectionBToA,
+		AICommitAPIKey: "saved-key",
+	})
+	generator := &commitGeneratorStub{message: "feat(sync): 生成提交信息"}
+	service.SetCommitGenerator(generator)
+	service.Startup(context.Background())
+
+	message, err := service.GenerateCommitMessage()
+	if err != nil {
+		t.Fatalf("GenerateCommitMessage failed: %v", err)
+	}
+	if message != generator.message {
+		t.Fatalf("unexpected generated message: %s", message)
+	}
+	if generator.apiKey != "saved-key" {
+		t.Fatalf("unexpected api key: %s", generator.apiKey)
+	}
+	if generator.changes == "" || !strings.Contains(generator.changes, "tracked.txt") {
+		t.Fatalf("expected change summary to mention tracked.txt, got %q", generator.changes)
+	}
+}
+
+func TestServiceSetAICommitAPIKeyPersistsWithoutExposingSecret(t *testing.T) {
+	store := config.NewStoreWithPath(filepath.Join(t.TempDir(), "config.json"))
+	service := newTestService(t, store, &selectorStub{}, model.DefaultConfig())
+	service.Startup(context.Background())
+
+	state, err := service.SetAICommitAPIKey("  secret-key  ")
+	if err != nil {
+		t.Fatalf("SetAICommitAPIKey failed: %v", err)
+	}
+	if !state.AICommitConfigured {
+		t.Fatal("expected AI commit key to be marked as configured")
+	}
+	if state.Config.AICommitAPIKey != "" {
+		t.Fatalf("state should hide the api key, got %q", state.Config.AICommitAPIKey)
+	}
+	reloaded, err := store.Load()
+	if err != nil {
+		t.Fatalf("store.Load failed: %v", err)
+	}
+	if reloaded.AICommitAPIKey != "secret-key" {
+		t.Fatalf("expected trimmed key to persist, got %q", reloaded.AICommitAPIKey)
+	}
+}
+
 func newTestService(
 	t *testing.T,
 	store *config.Store,
@@ -196,6 +254,18 @@ func newTestService(
 type selectorStub struct {
 	paths []string
 	index int
+}
+
+type commitGeneratorStub struct {
+	apiKey  string
+	changes string
+	message string
+}
+
+func (stub *commitGeneratorStub) Generate(apiKey string, changes string) (string, error) {
+	stub.apiKey = apiKey
+	stub.changes = changes
+	return stub.message, nil
 }
 
 func (stub *selectorStub) Open(context.Context, string, string) (string, error) {

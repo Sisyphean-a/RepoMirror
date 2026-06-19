@@ -125,6 +125,10 @@ func (stub inspectorStub) ReadTargetStatusFromRoot(root string) (model.TargetRep
 	return stub.readTargetStatusRoot(root)
 }
 
+func (inspectorStub) DescribeWorkingTree(string) (string, error) {
+	return "", nil
+}
+
 func (inspectorStub) Commit(string, string) error {
 	return nil
 }

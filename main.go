@@ -4,6 +4,7 @@ import (
 	"embed"
 	"fmt"
 
+	"RepoMirror/internal/aicommit"
 	appsvc "RepoMirror/internal/app"
 	"RepoMirror/internal/config"
 	"RepoMirror/internal/diff"
@@ -43,6 +44,7 @@ func main() {
 		synchronizer,
 		initialConfig,
 	)
+	service.SetCommitGenerator(aicommit.NewClient())
 	app := NewApp(service)
 
 	err = wails.Run(&options.App{

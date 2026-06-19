@@ -18,11 +18,13 @@ function Dashboard(viewModel: ReturnType<typeof useRepoMirror>) {
     changeDirection,
     commit,
     error,
+    generateCommit,
     lastUpdatedAt,
     notice,
     push,
     refresh,
     save,
+    saveAICommitAPIKey,
     selectRepo,
     swap,
     sync,
@@ -69,7 +71,10 @@ function Dashboard(viewModel: ReturnType<typeof useRepoMirror>) {
             error={error}
             onSync={sync}
             onCommit={commit}
+            onGenerateCommit={generateCommit}
             onPush={push}
+            onSaveAICommitAPIKey={saveAICommitAPIKey}
+            aiCommitConfigured={state.aiCommitConfigured}
             disableActions={busy || !state.targetStatus.isGitRepo}
           />
         </main>

@@ -50,6 +50,7 @@ export interface DiffSummary {
 
 export interface DashboardState {
   config: AppConfig;
+  aiCommitConfigured: boolean;
   repositoryA: RepositorySummary;
   repositoryB: RepositorySummary;
   sourceSlot: RepositorySlot;

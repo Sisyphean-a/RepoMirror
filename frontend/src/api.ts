@@ -36,6 +36,14 @@ export function commitTarget(message: string): Promise<DashboardState> {
   return backend().CommitTarget(message);
 }
 
+export function generateCommitMessage(): Promise<string> {
+  return backend().GenerateCommitMessage();
+}
+
+export function setAICommitAPIKey(apiKey: string): Promise<DashboardState> {
+  return backend().SetAICommitAPIKey(apiKey);
+}
+
 export function pushTarget(): Promise<DashboardState> {
   return backend().PushTarget();
 }

@@ -25,14 +25,15 @@ func (s *Service) buildState(cfg model.AppConfig) (model.DashboardState, error) 
 	sourceSlot := cfg.Direction.SourceSlot()
 	targetSlot := cfg.Direction.TargetSlot()
 	state := model.DashboardState{
-		Config:       cfg,
-		RepositoryA:  repositoryA.summary,
-		RepositoryB:  repositoryB.summary,
-		SourceSlot:   sourceSlot,
-		TargetSlot:   targetSlot,
-		Summary:      model.DiffSummary{},
-		Differences:  emptyDifferences,
-		TargetStatus: targetStatusForSlot(targetSlot, repositoryA, repositoryB),
+		Config:             cfg.Sanitized(),
+		AICommitConfigured: hasAICommitAPIKey(cfg),
+		RepositoryA:        repositoryA.summary,
+		RepositoryB:        repositoryB.summary,
+		SourceSlot:         sourceSlot,
+		TargetSlot:         targetSlot,
+		Summary:            model.DiffSummary{},
+		Differences:        emptyDifferences,
+		TargetStatus:       targetStatusForSlot(targetSlot, repositoryA, repositoryB),
 	}
 	if !canApplyDiff(cfg.Direction, repositoryA, repositoryB) {
 		return state, nil

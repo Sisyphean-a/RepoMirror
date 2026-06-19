@@ -11,8 +11,11 @@ interface TargetStatusPanelProps {
   busy: boolean;
   error: string;
   onSync: () => void;
-  onCommit: (message: string) => Promise<void>;
+  onCommit: (message: string) => Promise<boolean>;
+  onGenerateCommit: () => Promise<string>;
   onPush: () => void;
+  onSaveAICommitAPIKey: (apiKey: string) => Promise<boolean>;
+  aiCommitConfigured: boolean;
   disableActions: boolean;
 }
 
@@ -41,8 +44,10 @@ function TargetBody({
 }) {
   const actionState = buildActionState(props, commitMessage);
   const handleCommit = async () => {
-    await props.onCommit(commitMessage);
-    onCommitMessageChange("");
+    const committed = await props.onCommit(commitMessage);
+    if (committed) {
+      onCommitMessageChange("");
+    }
   };
 
   return (
@@ -51,8 +56,13 @@ function TargetBody({
       <div className="target-divider" />
       <SyncSummarySection summary={props.summary} />
       <CommitSection
+        aiCommitConfigured={props.aiCommitConfigured}
+        busy={props.busy}
         commitMessage={commitMessage}
+        generateDisabled={actionState.generateDisabled}
         helperText={actionState.helperText}
+        onGenerateCommit={props.onGenerateCommit}
+        onSaveAICommitAPIKey={props.onSaveAICommitAPIKey}
         onCommitMessageChange={onCommitMessageChange}
       />
       <TargetActions
@@ -102,23 +112,77 @@ const SyncSummarySection = memo(function SyncSummarySection({ summary }: { summa
 });
 
 function CommitSection({
+  aiCommitConfigured,
+  busy,
   commitMessage,
+  generateDisabled,
   helperText,
+  onGenerateCommit,
+  onSaveAICommitAPIKey,
   onCommitMessageChange,
 }: {
+  aiCommitConfigured: boolean;
+  busy: boolean;
   commitMessage: string;
+  generateDisabled: boolean;
   helperText: string;
+  onGenerateCommit: () => Promise<string>;
+  onSaveAICommitAPIKey: (apiKey: string) => Promise<boolean>;
   onCommitMessageChange: (value: string) => void;
 }) {
+  const [apiKeyDraft, setAPIKeyDraft] = useState("");
+
+  const handleSaveKey = async () => {
+    const trimmed = apiKeyDraft.trim();
+    if (!trimmed) {
+      return;
+    }
+    const saved = await onSaveAICommitAPIKey(trimmed);
+    if (saved) {
+      setAPIKeyDraft("");
+    }
+  };
+
+  const handleGenerateCommit = async () => {
+    const trimmed = apiKeyDraft.trim();
+    if (trimmed) {
+      const saved = await onSaveAICommitAPIKey(trimmed);
+      if (!saved) {
+        return;
+      }
+      setAPIKeyDraft("");
+    }
+    const message = await onGenerateCommit();
+    if (message) {
+      onCommitMessageChange(message);
+    }
+  };
+
   return (
     <div className="commit-section">
       <div className="section-label">提交信息</div>
+      <div className="ai-key-row">
+        <input
+          className="ai-key-input"
+          placeholder={aiCommitConfigured ? "已保存 DeepSeek Key，输入可覆盖" : "输入 DeepSeek API Key"}
+          type="password"
+          value={apiKeyDraft}
+          onChange={(event) => setAPIKeyDraft(event.target.value)}
+        />
+        <button className="secondary-button ai-key-button" disabled={busy || !apiKeyDraft.trim()} onClick={handleSaveKey} type="button">
+          保存 Key
+        </button>
+      </div>
+      <div className="ai-key-status">{aiCommitConfigured ? "已配置 DeepSeek Key" : "未配置 DeepSeek Key"}</div>
       <textarea
         className="commit-textarea"
         placeholder="chore: 从源仓库同步"
         value={commitMessage}
         onChange={(event) => onCommitMessageChange(event.target.value)}
       />
+      <button className="secondary-button ai-generate-button" disabled={generateDisabled} onClick={handleGenerateCommit} type="button">
+        AI 生成
+      </button>
       <div className="commit-helper">{helperText}</div>
     </div>
   );
@@ -162,6 +226,7 @@ const TargetActions = memo(function TargetActions({
 interface ActionState {
   helperText: string;
   commitDisabled: boolean;
+  generateDisabled: boolean;
   syncDisabled: boolean;
 }
 
@@ -172,6 +237,7 @@ function buildActionState(props: TargetStatusPanelProps, commitMessage: string):
   return {
     helperText,
     commitDisabled: props.disableActions || !hasPendingChanges || !commitMessage.trim(),
+    generateDisabled: props.disableActions || !hasPendingChanges,
     syncDisabled: props.busy || !props.canSync,
   };
 }

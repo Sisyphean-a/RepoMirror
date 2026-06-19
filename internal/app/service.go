@@ -16,6 +16,7 @@ type RepositoryInspector interface {
 	ResolveRepositoryRoot(path string) (string, error)
 	ReadTargetStatus(repoPath string) (model.TargetRepositoryStatus, error)
 	ReadTargetStatusFromRoot(root string) (model.TargetRepositoryStatus, error)
+	DescribeWorkingTree(repoPath string) (string, error)
 	Commit(repoPath string, message string) error
 	Push(repoPath string) error
 }
@@ -29,14 +30,15 @@ type RepositorySynchronizer interface {
 }
 
 type Service struct {
-	mu           sync.Mutex
-	ctx          context.Context
-	store        *config.Store
-	selector     DirectorySelector
-	inspector    RepositoryInspector
-	differ       DifferenceCalculator
-	synchronizer RepositorySynchronizer
-	config       model.AppConfig
+	mu              sync.Mutex
+	ctx             context.Context
+	store           *config.Store
+	selector        DirectorySelector
+	inspector       RepositoryInspector
+	commitGenerator CommitMessageGenerator
+	differ          DifferenceCalculator
+	synchronizer    RepositorySynchronizer
+	config          model.AppConfig
 }
 
 func NewService(

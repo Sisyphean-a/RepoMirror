@@ -55,6 +55,14 @@ func (a *App) CommitTarget(message string) (model.DashboardState, error) {
 	return a.service.CommitTarget(message)
 }
 
+func (a *App) GenerateCommitMessage() (string, error) {
+	return a.service.GenerateCommitMessage()
+}
+
+func (a *App) SetAICommitAPIKey(apiKey string) (model.DashboardState, error) {
+	return a.service.SetAICommitAPIKey(apiKey)
+}
+
 func (a *App) PushTarget() (model.DashboardState, error) {
 	return a.service.PushTarget()
 }

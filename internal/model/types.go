@@ -62,11 +62,12 @@ func ParseRepositorySlot(raw string) (RepositorySlot, error) {
 }
 
 type AppConfig struct {
-	ProjectA     string    `json:"projectA"`
-	ProjectB     string    `json:"projectB"`
-	Direction    Direction `json:"direction"`
-	WindowWidth  int       `json:"windowWidth"`
-	WindowHeight int       `json:"windowHeight"`
+	ProjectA       string    `json:"projectA"`
+	ProjectB       string    `json:"projectB"`
+	Direction      Direction `json:"direction"`
+	WindowWidth    int       `json:"windowWidth"`
+	WindowHeight   int       `json:"windowHeight"`
+	AICommitAPIKey string    `json:"aiCommitApiKey,omitempty"`
 }
 
 func DefaultConfig() AppConfig {
@@ -88,6 +89,12 @@ func (cfg AppConfig) WithDefaults() AppConfig {
 	if next.WindowHeight <= 0 {
 		next.WindowHeight = DefaultWindowHeight
 	}
+	return next
+}
+
+func (cfg AppConfig) Sanitized() AppConfig {
+	next := cfg
+	next.AICommitAPIKey = ""
 	return next
 }
 
@@ -168,15 +175,16 @@ func BuildDiffSummary(entries []DiffEntry) DiffSummary {
 }
 
 type DashboardState struct {
-	Config       AppConfig              `json:"config"`
-	RepositoryA  RepositorySummary      `json:"repositoryA"`
-	RepositoryB  RepositorySummary      `json:"repositoryB"`
-	SourceSlot   RepositorySlot         `json:"sourceSlot"`
-	TargetSlot   RepositorySlot         `json:"targetSlot"`
-	Differences  []DiffEntry            `json:"differences"`
-	Summary      DiffSummary            `json:"summary"`
-	TargetStatus TargetRepositoryStatus `json:"targetStatus"`
-	CanSync      bool                   `json:"canSync"`
+	Config             AppConfig              `json:"config"`
+	AICommitConfigured bool                   `json:"aiCommitConfigured"`
+	RepositoryA        RepositorySummary      `json:"repositoryA"`
+	RepositoryB        RepositorySummary      `json:"repositoryB"`
+	SourceSlot         RepositorySlot         `json:"sourceSlot"`
+	TargetSlot         RepositorySlot         `json:"targetSlot"`
+	Differences        []DiffEntry            `json:"differences"`
+	Summary            DiffSummary            `json:"summary"`
+	TargetStatus       TargetRepositoryStatus `json:"targetStatus"`
+	CanSync            bool                   `json:"canSync"`
 }
 
 func RepositoryName(path string) string {

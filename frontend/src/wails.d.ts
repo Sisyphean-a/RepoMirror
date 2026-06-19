@@ -9,6 +9,8 @@ interface RepoMirrorBackend {
   SaveConfig(): Promise<DashboardState>;
   SyncRepositories(): Promise<DashboardState>;
   CommitTarget(message: string): Promise<DashboardState>;
+  GenerateCommitMessage(): Promise<string>;
+  SetAICommitAPIKey(apiKey: string): Promise<DashboardState>;
   PushTarget(): Promise<DashboardState>;
 }
 
