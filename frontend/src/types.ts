@@ -33,6 +33,7 @@ export interface TargetRepositoryStatus {
   isClean: boolean;
   modifiedCount: number;
   untrackedCount: number;
+  canPush: boolean;
 }
 
 export interface DiffEntry {

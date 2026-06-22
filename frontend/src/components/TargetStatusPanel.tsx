@@ -67,7 +67,7 @@ function TargetBody({
       />
       <TargetActions
         commitDisabled={actionState.commitDisabled}
-        disableActions={props.disableActions}
+        pushDisabled={actionState.pushDisabled}
         syncDisabled={actionState.syncDisabled}
         onCommit={handleCommit}
         onPush={props.onPush}
@@ -190,14 +190,14 @@ function CommitSection({
 
 const TargetActions = memo(function TargetActions({
   commitDisabled,
-  disableActions,
+  pushDisabled,
   syncDisabled,
   onCommit,
   onPush,
   onSync,
 }: {
   commitDisabled: boolean;
-  disableActions: boolean;
+  pushDisabled: boolean;
   syncDisabled: boolean;
   onCommit: () => void;
   onPush: () => void;
@@ -214,7 +214,7 @@ const TargetActions = memo(function TargetActions({
           <CommitIcon className="button-icon" />
           <span>提交</span>
         </button>
-        <button className="secondary-button" disabled={disableActions} onClick={onPush} type="button">
+        <button className="secondary-button" disabled={pushDisabled} onClick={onPush} type="button">
           <PushIcon className="button-icon" />
           <span>推送</span>
         </button>
@@ -227,6 +227,7 @@ interface ActionState {
   helperText: string;
   commitDisabled: boolean;
   generateDisabled: boolean;
+  pushDisabled: boolean;
   syncDisabled: boolean;
 }
 
@@ -238,6 +239,7 @@ function buildActionState(props: TargetStatusPanelProps, commitMessage: string):
     helperText,
     commitDisabled: props.disableActions || !hasPendingChanges || !commitMessage.trim(),
     generateDisabled: props.disableActions || !hasPendingChanges,
+    pushDisabled: props.disableActions || !props.status.canPush,
     syncDisabled: props.busy || !props.canSync,
   };
 }

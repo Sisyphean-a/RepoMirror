@@ -135,6 +135,7 @@ type TargetRepositoryStatus struct {
 	IsClean        bool   `json:"isClean"`
 	ModifiedCount  int    `json:"modifiedCount"`
 	UntrackedCount int    `json:"untrackedCount"`
+	CanPush        bool   `json:"canPush"`
 }
 
 type DiffKind string

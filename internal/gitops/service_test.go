@@ -254,6 +254,44 @@ func TestBuildTargetStatusParsesBranchAndCounts(t *testing.T) {
 	}
 }
 
+func TestBuildTargetStatusSetsCanPushFromUpstreamState(t *testing.T) {
+	tests := []struct {
+		name        string
+		statusText  string
+		wantCanPush bool
+	}{
+		{
+			name:        "ahead of upstream",
+			statusText:  "# branch.oid abc\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +2 -0\n",
+			wantCanPush: true,
+		},
+		{
+			name:        "already pushed",
+			statusText:  "# branch.oid abc\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -0\n",
+			wantCanPush: false,
+		},
+		{
+			name:        "no upstream",
+			statusText:  "# branch.oid abc\n# branch.head main\n# branch.ab +1 -0\n",
+			wantCanPush: false,
+		},
+		{
+			name:        "diverged from upstream",
+			statusText:  "# branch.oid abc\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +1 -1\n",
+			wantCanPush: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			status := buildTargetStatus("C:/repo", []byte(test.statusText))
+			if status.CanPush != test.wantCanPush {
+				t.Fatalf("unexpected pushability: got %v want %v for %+v", status.CanPush, test.wantCanPush, status)
+			}
+		})
+	}
+}
+
 func TestParseTaggedPath(t *testing.T) {
 	status, path := parseTaggedPath("R dir/file.txt")
 	if status != "R" || path != "dir/file.txt" {

@@ -169,9 +169,16 @@ func TestServiceSyncCommitAndPushFlow(t *testing.T) {
 	if !committedState.TargetStatus.IsClean {
 		t.Fatalf("target should be clean after commit, got %+v", committedState.TargetStatus)
 	}
+	if !committedState.TargetStatus.CanPush {
+		t.Fatalf("target should be pushable after commit, got %+v", committedState.TargetStatus)
+	}
 
-	if _, err := service.PushTarget(); err != nil {
+	pushedState, err := service.PushTarget()
+	if err != nil {
 		t.Fatalf("push failed: %v", err)
+	}
+	if pushedState.TargetStatus.CanPush {
+		t.Fatalf("target should not stay pushable after push, got %+v", pushedState.TargetStatus)
 	}
 	localHead := testutil.RunGitOutput(t, target, "rev-parse", "HEAD")
 	remoteHead := testutil.RunGitOutput(t, target, "--git-dir", remote, "rev-parse", "refs/heads/"+branch)

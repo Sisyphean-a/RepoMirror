@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -355,6 +356,9 @@ func buildTargetStatus(repoPath string, statusOutput []byte) model.TargetReposit
 		Branch:    "HEAD",
 		IsGitRepo: true,
 	}
+	hasUpstream := false
+	aheadCount := 0
+	behindCount := 0
 	for start := 0; start < len(statusOutput); {
 		end := bytes.IndexByte(statusOutput[start:], '\n')
 		if end == -1 {
@@ -365,6 +369,13 @@ func buildTargetStatus(repoPath string, statusOutput []byte) model.TargetReposit
 			if line[0] == '#' {
 				if branch, ok := parseBranchHead(line); ok {
 					status.Branch = branch
+				}
+				if hasBranchUpstream(line) {
+					hasUpstream = true
+				}
+				if ahead, behind, ok := parseBranchAheadBehind(line); ok {
+					aheadCount = ahead
+					behindCount = behind
 				}
 			} else if isUntrackedStatusLine(line) {
 				status.UntrackedCount++
@@ -378,6 +389,7 @@ func buildTargetStatus(repoPath string, statusOutput []byte) model.TargetReposit
 		start += end + 1
 	}
 	status.IsClean = status.ModifiedCount == 0 && status.UntrackedCount == 0
+	status.CanPush = hasUpstream && aheadCount > 0 && behindCount == 0
 	return status
 }
 
@@ -393,6 +405,35 @@ func parseBranchHead(line []byte) (string, bool) {
 }
 
 var branchHeadPrefixBytes = []byte("# branch.head ")
+var branchUpstreamPrefixBytes = []byte("# branch.upstream ")
+var branchAheadBehindPrefixBytes = []byte("# branch.ab ")
+
+func hasBranchUpstream(line []byte) bool {
+	return bytes.HasPrefix(line, branchUpstreamPrefixBytes) && len(line) > len(branchUpstreamPrefixBytes)
+}
+
+func parseBranchAheadBehind(line []byte) (int, int, bool) {
+	if !bytes.HasPrefix(line, branchAheadBehindPrefixBytes) {
+		return 0, 0, false
+	}
+	payload := bytesToStringView(line[len(branchAheadBehindPrefixBytes):])
+	aheadText, behindText, ok := strings.Cut(payload, " ")
+	if !ok || len(aheadText) < 2 || len(behindText) < 2 {
+		return 0, 0, false
+	}
+	if aheadText[0] != '+' || behindText[0] != '-' {
+		return 0, 0, false
+	}
+	ahead, err := strconv.Atoi(aheadText[1:])
+	if err != nil {
+		return 0, 0, false
+	}
+	behind, err := strconv.Atoi(behindText[1:])
+	if err != nil {
+		return 0, 0, false
+	}
+	return ahead, behind, true
+}
 
 func isUntrackedStatusLine(line []byte) bool {
 	return len(line) >= 2 && line[0] == '?' && line[1] == ' '
