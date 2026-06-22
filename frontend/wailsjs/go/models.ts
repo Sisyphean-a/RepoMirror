@@ -31,6 +31,7 @@ export namespace model {
 	    isClean: boolean;
 	    modifiedCount: number;
 	    untrackedCount: number;
+	    canPush: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new TargetRepositoryStatus(source);
@@ -46,6 +47,7 @@ export namespace model {
 	        this.isClean = source["isClean"];
 	        this.modifiedCount = source["modifiedCount"];
 	        this.untrackedCount = source["untrackedCount"];
+	        this.canPush = source["canPush"];
 	    }
 	}
 	export class DiffSummary {
